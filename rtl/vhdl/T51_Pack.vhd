@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0219
+-- Version : 0222
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -123,6 +123,7 @@ package T51_Pack is
 		RAM_Addr	: out std_logic_vector(15 downto 0);
 		RAM_RData	: in std_logic_vector(7 downto 0);
 		RAM_WData	: out std_logic_vector(7 downto 0);
+		RAM_Cycle	: out std_logic;
 		RAM_Rd		: out std_logic;
 		RAM_Wr		: out std_logic;
 		Int_Trig	: in std_logic_vector(6 downto 0);

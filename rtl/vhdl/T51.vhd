@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0219
+-- Version : 0222
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -64,6 +64,7 @@ entity T51 is
 		RAM_Addr	: out std_logic_vector(15 downto 0);
 		RAM_RData	: in std_logic_vector(7 downto 0);
 		RAM_WData	: out std_logic_vector(7 downto 0);
+		RAM_Cycle	: out std_logic;
 		RAM_Rd		: out std_logic;
 		RAM_Wr		: out std_logic;
 		Int_Trig	: in std_logic_vector(6 downto 0);
@@ -508,6 +509,7 @@ begin
 	end process;
 	SFR_RData <= DPL when Int_AddrA = "10000010" else "ZZZZZZZZ";
 	SFR_RData <= DPH when Int_AddrA = "10000011" else "ZZZZZZZZ";
+	RAM_Cycle <= '1' when Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and PCPaused(0) = '0' else '0';
 	RAM_Rd <= RAM_Rd_i;
 	process (Rst_n, Clk)
 		variable tmp : unsigned(15 downto 0);
@@ -517,19 +519,19 @@ begin
 			DPL <= "00000000";
 			DPH <= "00000000";
 			INC_DPTR <= '0';
-			RAM_Wr <= '0';
 			RAM_Rd_i <= '0';
+			RAM_Wr <= '0';
 		elsif Clk'event and Clk = '1' then
+			if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
+				P2R <= Res_Bus;
+			end if;
+			if SFR_Wr_i = '1' and Int_AddrA_r = "10000010" then
+				DPL <= Res_Bus;
+			end if;
+			if SFR_Wr_i = '1' and Int_AddrA_r = "10000011" then
+				DPH <= Res_Bus;
+			end if;
 			if Ready = '1' then
-				if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
-					P2R <= Res_Bus;
-				end if;
-				if SFR_Wr_i = '1' and Int_AddrA_r = "10000010" then
-					DPL <= Res_Bus;
-				end if;
-				if SFR_Wr_i = '1' and Int_AddrA_r = "10000011" then
-					DPH <= Res_Bus;
-				end if;
 				-- 10010000 3 MOV   DPTR,#data
 				if Inst = "10010000" and FCycle = "10" then
 					DPH <= Inst1;
@@ -547,14 +549,15 @@ begin
 				if Inst = "10100011" then
 					INC_DPTR <= '1';
 				end if;
-				RAM_Wr <= '0';
-				if Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" then
-					RAM_Wr <= '1';
-				end if;
-				RAM_Rd_i <= '0';
-				if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
-					RAM_Rd_i <= '1';
-				end if;
+			end if;
+			RAM_Wr <= '0';
+			if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and DualBus) or
+				(Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and Ready = '0' and not DualBus) then
+				RAM_Wr <= '1';
+			end if;
+			RAM_Rd_i <= '0';
+			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and Ready = '1' then
+				RAM_Rd_i <= '1';
 			end if;
 		end if;
 	end process;
@@ -573,11 +576,10 @@ begin
 			IP <= "00000000";
 			ICall <= '0';
 		elsif Clk'event and Clk = '1' then
+			if SFR_Wr_i = '1' and Int_AddrA_r = "10111000" then
+				IP <= Res_Bus;
+			end if;
 			if Ready = '1' then
-				if SFR_Wr_i = '1' and Int_AddrA_r = "10111000" then
-					IP <= Res_Bus;
-				end if;
-
 				if (Int_Trig and IP(6 downto 0)) /= "0000000" and HPInt = '0' and IPending = '0' and ICall = '0' then
 					Int_Trig_r <= Int_Trig and IP(6 downto 0);
 					IPending <= '1';
@@ -672,6 +674,10 @@ begin
 			if Ri_Stall = '0' and PSW_Stall = '0' then
 				NPC <= PC + 1;
 			end if;
+		end if;
+		-- Single bus MOVX
+		if Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and not DualBus then
+			J_Skip <= '1';
 		end if;
 		-- Return
 		if Inst(7 downto 5) = "001" and Inst(3 downto 0) = "0010" then -- RET, RETI
