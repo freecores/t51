@@ -55,10 +55,10 @@ begin
 	P3(0) <= RXD;
 	ExDI <= (others => '1');
 
-	as : AsyncStim generic map(FileName => "BASIC.txt", InterCharDelay => 12000 us, Baud => 115200, Bits => 8)
+	as : AsyncStim generic map(FileName => "BASIC.txt", InterCharDelay => 5000 us, Baud => 115200, Bits => 8)
 				port map(RXD);
 
-	al : AsyncLog generic map(FileName => "RX_Log.txt", Baud => 14400, Bits => 8)
+	al : AsyncLog generic map(FileName => "RX_Log.txt", Baud => 115200, Bits => 8)
 				port map(TXD);
 
 	Clk <= not Clk after 45 ns;
