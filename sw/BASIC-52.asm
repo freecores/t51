@@ -8,12 +8,14 @@
 ;*                                                                           *
 ;*---------------------------------------------------------------------------*
 ;*              Alterations made by D. Wulf , December 18, 1999              *
+;*              Alterations made by D. Wallner , May 4, 2002                 *
 ;*                                                                           *
 ;*****************************************************************************
 ;
-;  The BASIC-52.SRC source listing, when compiled without modification,
-;  create the same object code that is found on the MCS BASIC-52 
-;  Version 1.1 microcontrollers.
+;  The BASIC.a51 source listing, when compiled without modification,
+;  create the same object code that is found on the MCS BASIC-52
+;  Version 1.1 microcontrollers but with a timing independent baud rate
+;  recognition routine and a shorter ego message.
 ;
 ;  The following alterations are made to the original source code:
 ;
@@ -28,6 +30,9 @@
 ;
 ;  One routine in the source was different to the ROM code and is replaced 
 ;  by the ROM code.                       
+;
+;  Daniel Wallner , May 4, 2002:
+;  Part of ego message replaced with a different baud recognition routine.
 ;
 ;*****************************************************************************
 ;
@@ -1001,7 +1006,7 @@ CRST:	; This performs system initialzation, it was moved here so the
 	MOV	SCON,#5AH	;INITIALIZE SFR'S
 	MOV	TMOD,#10H
 	MOV	TCON,#54H
-        MOV     T2CON,#34H
+	MOV	T2CON,#34H
 ;       DB      75H             ;MOV DIRECT, # OP CODE
 ;       DB      0C8H            ;T2CON LOCATION
 ;       DB      34H             ;CONFIGURATION BYTE
@@ -1081,21 +1086,26 @@ CR20:   JNC     BG1             ;CHECK FOR 0,1,2,3, OR 4
 	MOVX	A,@DPTR		;READ THE BYTE
 	CJNE	A,#55H,BG3
 	LJMP	CRUN
-	;
+
+	; START OF BAUD RATE MODIFICATIONS BY DANIEL WALLNER
+
 BG1:	CLR	A		;DO BAUD RATE
 	MOV	R3,A
 	MOV	R1,A
-	MOV	R0,#4
+	MOV	TL2,A
+	CLR	T2CON.2
 	JB	RXD,$		;LOOP UNTIL A CHARACTER IS RECEIVED
-	;
-BG2:	DJNZ	R0,$		;FOUR CLOCKS, IN LOOP
-        CALL    DEC3211         ;NINE CLOCKS
-	MOV	R0,#2		;ONE CLOCK
-	JNB	RXD,BG2		;TWO CLOCKS, LOOP UNTIL DONE
-	JB	RXD,$		;WAIT FOR STOP CHARACTER TO END
+	MOV	T2CON,#5
+	CALL	TIB2
 	JNB	RXD,$
+	MOV	T2CON,#34H
 	CALL	RCL		;LOAD THE TIMER
-	;
+	NOP
+	NOP
+
+	; END OF BAUD RATE MODIFICATIONS BY DANIEL WALLNER
+
+
 BG3:	MOV	DPTR,#S_N	;GET THE MESSAGE
 	ACALL	CRP		;PRINT IT
 	LJMP	CRAM
@@ -5760,18 +5770,33 @@ GET_NUM:ACALL   FP_BASE5        ;SCAN FOR HEX
 	RET			;EXIT
 	;
 $EJECT
+
+	; START OF BAUD RATE MODIFICATIONS BY DANIEL WALLNER
+TIB1:MOV	ACC,TL2
+	JB	ACC.3,TIB1
+	CALL    DEC3211
+TIB2:	MOV	ACC,TL2
+	JNB	ACC.3,TIB2
+	JNB	RXD,TIB1		;16x12 CLOCKS, LOOP UNTIL DONE
+	JB	RXD,$		;WAIT FOR STOP CHARACTER TO END
+	RET
+
 	;**************************************************************
 	;
 	; WB - THE EGO MESSAGE
 	;
 	;**************************************************************
 	;
-WB:	DB	'W'+80H,'R'+80H
-	DB	'I'+80H,'T'+80H,'T','E'+80H,'N'+80H
-	DB	' ','B'+80H,'Y'+80H,' '
-	DB	'J'+80H,'O'+80H,'H'+80H,'N'+80H,' '+80H
-	DB	'K','A'+80H,'T'+80H,'A'+80H,'U'+80H
-	DB	'S','K'+80H,'Y'+80H
+WB:
+;	DB	'W'+80H,'R'+80H
+;	DB	'I'+80H,'T'+80H,'T','E'+80H,'N'+80H
+;	DB	' ','B'+80H,'Y'+80H,' '
+;	DB	'J'+80H,'O'+80H,'H'+80H,'N'+80H,' '+80H
+;	DB	'K','A'+80H,'T'+80H,'A'+80H,'U'+80H
+;	DB	'S','K'+80H,'Y'+80H
+
+	; END OF BAUD RATE MODIFICATIONS BY DANIEL WALLNER
+
 	DB	', I','N'+80H,'T'+80H,'E'+80H,'L'+80H
 	DB	' '+80H,'C'+80H,'O'+80H,'R'+80H,'P'+80H
 	DB	'. 1','9'+80H,'85'
