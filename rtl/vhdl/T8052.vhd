@@ -1,7 +1,7 @@
 --
 -- 8052 compatible microcontroller, with internal RAM & ROM
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -105,7 +105,7 @@ architecture rtl of T8052 is
 	);
 	end component;
 
-	signal	Rst_s_n		: std_logic;
+	signal	Ready		: std_logic;
 	signal	ROM_Addr	: std_logic_vector(15 downto 0);
 	signal	ROM_Data	: std_logic_vector(7 downto 0);
 	signal	RAM_Addr	: std_logic_vector(15 downto 0);
@@ -177,15 +177,7 @@ architecture rtl of T8052 is
 
 begin
 
-	-- Synchronise reset
-	process (Rst_n, Clk)
-	begin
-		if Rst_n = '0' then
-			Rst_s_n <= '0';
-		elsif Clk'event and Clk = '1' then
-			Rst_s_n <= '1';
-		end if;
-	end process;
+	Ready <= '1';
 
 	ExSel <= Ex_Sel_i;
 	ExRd <= RAM_Rd;
@@ -233,10 +225,12 @@ begin
 
 	core51 : T51
 		generic map(
+			DualBus => true,
 			RAMAddressWidth => IRAMAddressWidth)
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
+			Ready => Ready,
 			ROM_Addr => ROM_Addr,
 			ROM_Data => ROM_Data,
 			RAM_Addr => RAM_Addr,
@@ -255,19 +249,14 @@ begin
 	glue51 : T51_Glue
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			INT0 => INT0,
 			INT1 => INT1,
-			T0 => T0,
-			T1 => T1,
-			T2 => T2,
-			T2EX => T2EX,
 			RI => RI,
 			TI => TI,
 			OF0 => OF0,
 			OF1 => OF1,
 			OF2 => OF2,
-			IO_Rd => IO_Rd,
 			IO_Wr => IO_Wr,
 			IO_Addr => IO_Addr,
 			IO_Addr_r => IO_Addr_r,
@@ -314,7 +303,7 @@ begin
 	tp0 : T51_Port
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			Sel => P0_Sel,
 			Rd_RMW => IO_Rd,
 			Wr => P0_Wr,
@@ -325,7 +314,7 @@ begin
 	tp1 : T51_Port
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			Sel => P1_Sel,
 			Rd_RMW => IO_Rd,
 			Wr => P1_Wr,
@@ -336,7 +325,7 @@ begin
 	tp2 : T51_Port
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			Sel => P2_Sel,
 			Rd_RMW => IO_Rd,
 			Wr => P2_Wr,
@@ -347,7 +336,7 @@ begin
 	tp3 : T51_Port
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			Sel => P3_Sel,
 			Rd_RMW => IO_Rd,
 			Wr => P3_Wr,
@@ -360,7 +349,7 @@ begin
 			FastCount => false)
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			T0 => T0,
 			T1 => T1,
 			INT0 => INT0,
@@ -387,7 +376,7 @@ begin
 			FastCount => false)
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			T2 => T2,
 			T2EX => T2EX,
 			C_Sel => T2CON_Sel,
@@ -412,7 +401,7 @@ begin
 			FastCount => false)
 		port map(
 			Clk => Clk,
-			Rst_n => Rst_s_n,
+			Rst_n => Rst_n,
 			UseR2 => UseR2,
 			UseT2 => UseT2,
 			BaudC2 => UART_Clk,

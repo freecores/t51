@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -80,6 +80,8 @@ package T51_Pack is
 		B_Q			: out std_logic_vector(7 downto 0);
 		IDCPBL_Q	: out std_logic_vector(7 downto 0);
 		Div_Rdy		: out std_logic;
+		CJNE		: out std_logic;
+		DJNZ		: out std_logic;
 		CY_Out		: out std_logic;
 		AC_Out		: out std_logic;
 		OV_Out		: out std_logic;
@@ -95,6 +97,7 @@ package T51_Pack is
 	);
 	port (
 		Clk			: in std_logic;
+		ARE			: in std_logic;
 		Rst_n		: in std_logic;
 		Wr			: in std_logic;
 		DIn			: in std_logic_vector(7 downto 0);
@@ -108,11 +111,13 @@ package T51_Pack is
 
 	component T51
 	generic(
-		RAMAddressWidth : integer
+		DualBus : boolean := false;
+		RAMAddressWidth : integer := 8
 	);
 	port(
 		Clk			: in std_logic;
 		Rst_n		: in std_logic;
+		Ready		: in std_logic;
 		ROM_Addr	: out std_logic_vector(15 downto 0);
 		ROM_Data	: in std_logic_vector(7 downto 0);
 		RAM_Addr	: out std_logic_vector(15 downto 0);
@@ -136,16 +141,11 @@ package T51_Pack is
 		Rst_n		: in std_logic;
 		INT0		: in std_logic;
 		INT1		: in std_logic;
-		T0			: in std_logic;
-		T1			: in std_logic;
-		T2			: in std_logic;
-		T2EX		: in std_logic;
 		RI			: in std_logic;
 		TI			: in std_logic;
 		OF0			: in std_logic;
 		OF1			: in std_logic;
 		OF2			: in std_logic;
-		IO_Rd		: in std_logic;
 		IO_Wr		: in std_logic;
 		IO_Addr		: in std_logic_vector(6 downto 0);
 		IO_Addr_r	: in std_logic_vector(6 downto 0);

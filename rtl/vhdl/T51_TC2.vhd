@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -175,7 +175,7 @@ begin
 			end if;
 
 			if TCON(3) = '1' then
-				Capture <= T_r(1) and not T_r(0);
+				Capture <= E_r(1) and not E_r(0);
 			end if;
 
 			T_r(1) := T_r(0);

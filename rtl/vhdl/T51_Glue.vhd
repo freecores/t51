@@ -1,7 +1,7 @@
 --
 -- 8052 compatible microcontroller
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -55,16 +55,11 @@ entity T51_Glue is
 		Rst_n		: in std_logic;
 		INT0		: in std_logic;
 		INT1		: in std_logic;
-		T0			: in std_logic;
-		T1			: in std_logic;
-		T2			: in std_logic;
-		T2EX		: in std_logic;
 		RI			: in std_logic;
 		TI			: in std_logic;
 		OF0			: in std_logic;
 		OF1			: in std_logic;
 		OF2			: in std_logic;
-		IO_Rd		: in std_logic;
 		IO_Wr		: in std_logic;
 		IO_Addr		: in std_logic_vector(6 downto 0);
 		IO_Addr_r	: in std_logic_vector(6 downto 0);
@@ -190,9 +185,9 @@ begin
 		end if;
 	end process;
 
-	Int_Trig(0) <= '0' when IE(7) = '1' and IE(0) = '1' and TCON(0) = '1' else '0';
+	Int_Trig(0) <= '0' when IE(7) = '0' or IE(0) = '0' else not Int0_r(1) when TCON(0) = '0' else TCON(1);
 	Int_Trig(1) <= '1' when IE(7) = '1' and IE(1) = '1' and TCON(5) = '1' else '0';
-	Int_Trig(2) <= '0' when IE(7) = '1' and IE(2) = '1' and TCON(2) = '1' else '0';
+	Int_Trig(2) <= '0' when IE(7) = '0' or IE(2) = '0' else not Int1_r(1) when TCON(2) = '0' else TCON(3);
 	Int_Trig(3) <= '1' when IE(7) = '1' and IE(3) = '1' and TCON(7) = '1' else '0';
 	Int_Trig(4) <= '1' when IE(7) = '1' and IE(4) = '1' and (RI = '1' or TI = '1') else '0';
 	Int_Trig(5) <= '1' when IE(7) = '1' and IE(5) = '1' and OF2 = '1' else '0';

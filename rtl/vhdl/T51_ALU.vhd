@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -66,6 +66,8 @@ entity T51_ALU is
 		B_Q			: out std_logic_vector(7 downto 0);
 		IDCPBL_Q	: out std_logic_vector(7 downto 0);
 		Div_Rdy		: out std_logic;
+		CJNE		: out std_logic;
+		DJNZ		: out std_logic;
 		CY_Out		: out std_logic;
 		AC_Out		: out std_logic;
 		OV_Out		: out std_logic;
@@ -539,13 +541,14 @@ begin
 
 	IDCPBL_Q <= std_logic_vector(unsigned(IA) + 1) when Do_I_INC = '1' else "ZZZZZZZZ";	-- No flags
 	IDCPBL_Q <= std_logic_vector(unsigned(IA) - 1) when Do_I_DEC = '1' else "ZZZZZZZZ";	-- No flags
+	DJNZ <= '1' when std_logic_vector(unsigned(IA) - 1) /= "00000000" else '0';
 	IDCPBL_Q <= IOP or IA when Do_I_ORL = '1' else "ZZZZZZZZ";	-- No flags
 	IDCPBL_Q <= IOP and IA when Do_I_ANL = '1' else "ZZZZZZZZ";	-- No flags
 	IDCPBL_Q <= IOP xor IA when Do_I_XRL = '1' else "ZZZZZZZZ";	-- No flags
 	IDCPBL_Q <= ACC when Do_A_XCH = '1' else "ZZZZZZZZ";	-- No flags
 	IDCPBL_Q <= IA(7 downto 4) & ACC(3 downto 0) when Do_A_XCHD = '1' else "ZZZZZZZZ";	-- No flags
 
-	MOV : process (MOV_Op, IA, IB, ACC, IA_d)
+	MOV : process (MOV_Op, IB, ACC, IA_d)
 	begin
 		case MOV_Op is
 		when "0111" =>
@@ -582,8 +585,9 @@ begin
 
 	AddSub(IA, IB, '1', '1', CJNE_Q, CJNE_CY_n);
 	CY_Out <= not CJNE_CY_n when Do_I_CJNE = '1' else 'Z';
-	IDCPBL_Q <= CJNE_Q when Do_I_CJNE = '1' else "ZZZZZZZZ";	-- Sets CY
-	IDCPBL_Q <= AS_Q when Do_A_CJNE = '1' else "ZZZZZZZZ";	-- Sets CY
+	CJNE <= '1' when Do_I_CJNE = '1' and CJNE_Q /= "00000000" else
+			'0' when Do_I_CJNE = '1' else
+			'1' when AS_Q /= "00000000" else '0';	-- Sets CY
 
 	-- Bit operations
 

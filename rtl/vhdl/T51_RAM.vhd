@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -57,6 +57,7 @@ entity T51_RAM is
 	port (
 		Clk			: in std_logic;
 		Rst_n		: in std_logic;
+		ARE			: in std_logic;
 		Wr			: in std_logic;
 		DIn			: in std_logic_vector(7 downto 0);
 		Int_AddrA	: in std_logic_vector(7 downto 0);
@@ -92,12 +93,16 @@ begin
 -- pragma translate_off
 			if not is_x(Int_AddrA) then
 -- pragma translate_on
-				Mem_A <= IRAMA(to_integer(unsigned(Int_AddrA)));
+				if ARE = '1' then
+					Mem_A <= IRAMA(to_integer(unsigned(Int_AddrA)));
+				end if;
 -- pragma translate_off
 			end if;
 			if not is_x(Int_AddrB) then
 -- pragma translate_on
-				Mem_B <= IRAMB(to_integer(unsigned(Int_AddrB)));
+				if ARE = '1' then
+					Mem_B <= IRAMB(to_integer(unsigned(Int_AddrB)));
+				end if;
 -- pragma translate_off
 			end if;
 -- pragma translate_on

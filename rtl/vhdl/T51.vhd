@@ -1,7 +1,7 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0219
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
 --
@@ -52,11 +52,13 @@ use work.T51_Pack.all;
 
 entity T51 is
 	generic(
+		DualBus : boolean := false;
 		RAMAddressWidth : integer := 8
 	);
 	port(
 		Clk			: in std_logic;
 		Rst_n		: in std_logic;
+		Ready		: in std_logic;
 		ROM_Addr	: out std_logic_vector(15 downto 0);
 		ROM_Data	: in std_logic_vector(7 downto 0);
 		RAM_Addr	: out std_logic_vector(15 downto 0);
@@ -108,7 +110,6 @@ architecture rtl of T51 is
 	signal	Int_AddrA		: std_logic_vector(7 downto 0);
 	signal	Int_AddrA_r		: std_logic_vector(7 downto 0);
 	signal	Int_AddrB		: std_logic_vector(7 downto 0);
-	--signal	Int_AddrB_r		: std_logic_vector(7 downto 0);
 
 	signal	MCode			: std_logic_vector(3 downto 0);
 	signal	FCycle			: std_logic_vector(1 downto 0);
@@ -152,6 +153,8 @@ architecture rtl of T51 is
 	signal	Div_Rdy			: std_logic;
 	signal	RAM_Rd_i		: std_logic;
 	signal	INC_DPTR		: std_logic;
+	signal	CJNE			: std_logic;
+	signal	DJNZ			: std_logic;
 
 	-- Mux control
 	signal	AMux_SFR		: std_logic;
@@ -163,9 +166,9 @@ begin
 
 	Last <= '1' when ICall = '1' and FCycle = "11" else
 			'0' when ICall = '1' else
-			'1' when MCode(1 downto 0) = FCycle else '0';
+			'1' when MCode(1 downto 0) = FCycle and Ready = '1' else '0';
 
-	process (ROM_Data, ICall, Inst, Inst1, Inst2, MCode, Last, FCycle, PSW, Mem_A, Mem_B, SP, Old_Mem_B)
+	process (ROM_Data, ICall, Inst, Inst1, Inst2, Last, FCycle, PSW, Mem_B, SP, Old_Mem_B, Ready, Int_AddrA_r)
 	begin
 		Int_AddrA <= "--------";
 		Int_AddrB <= "--------";
@@ -250,6 +253,9 @@ begin
 				Int_AddrB <= "000" & PSW(4 downto 3) & "00" & ROM_Data(0);
 			end if;
 		end if;
+		if Ready = '0' then
+			Int_AddrA <= Int_AddrA_r;
+		end if;
 	end process;
 	Op_A <= SFR_RData_r when AMux_SFR = '1' else Mem_A;
 	Op_B <= Inst2 when BMux_Inst2 = '1' else Inst1;
@@ -270,12 +276,6 @@ begin
 			if Inst(3 downto 1) = "011" then
 				if not (Inst(7 downto 4) = "1010" and FCycle = "10") then
 					-- Indirect addressing
-					AMux_SFR <= '0';
-				end if;
-			end if;
-			if Inst = "11000000" then
-				-- 11000000 2 PUSH  data addr		INC SP: MOV "@SP",<src>
-				if FCycle = "10" then
 					AMux_SFR <= '0';
 				end if;
 			end if;
@@ -319,7 +319,7 @@ begin
 			end if;
 
 			-- LCALL, ACALL, Int
-			if (Inst = "00010010" or Inst(4 downto 0) = "10001" or ICall = '1') then
+			if Ready = '1' and (Inst = "00010010" or Inst(4 downto 0) = "10001" or ICall = '1') then
 				if FCycle /= "11" then -- LCALL
 					Mem_Wr <= '1';
 				end if;
@@ -328,7 +328,7 @@ begin
 	end process;
 
 	-- Instruction register
-	Inst_Skip <= '1' when (RET_r = '1' and unsigned(Mem_B) /= PC(15 downto 8)) else J_Skip;
+	Inst_Skip <= RET_r or J_Skip; -- '1' when (RET_r = '1' and unsigned(Mem_B) /= PC(15 downto 8)) else J_Skip; ????????????
 	Ri_Stall <= '1' when Inst /= "00000000" and
 				Int_AddrA = "000" & PSW(4 downto 3) & Inst(2 downto 0) and
 				ROM_Data(3 downto 1) = "011" and
@@ -347,7 +347,8 @@ begin
 			Bit_Pattern <= "00000000";
 		elsif Clk'event and Clk = '1' then
 			Rst_r_n <= '1';
-			if Rst_r_n = '0' or Inst_Skip = '1' or IStart = '1' or Ri_Stall = '1' or PSW_Stall = '1' then
+			if Ready = '0' then
+			elsif Rst_r_n = '0' or Inst_Skip = '1' or IStart = '1' or Ri_Stall = '1' or PSW_Stall = '1' then
 				-- Skip/Stall/Flush: NOP insertion
 				Inst <= (others => '0');
 			elsif Inst = "10000100" and PCPause = '1' then
@@ -462,20 +463,22 @@ begin
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10000001" then
 				SP <= unsigned(Res_Bus);
 			end if;
-			if Inst(7 downto 5) = "001" and Inst(3 downto 0) = "0010" then
-				SP <= SP - 2;
-			end if;
-			if (Inst = "00010010" or Inst(4 downto 0) = "10001" or ICall = '1') and Last = '1' then
-				-- LCALL, ACALL, ICall
-				SP <= SP + 2;
-			end if;
-			if Inst = "11000000" and PCPaused(0) = '1' then
-				-- 11000000 2 PUSH  data addr		INC SP: MOV "@SP",<src>
-				SP <= SP + 1;
-			end if;
-			if Inst = "11010000" and Last = '1' then
-				-- 11010000 2 POP   data addr		MOV <dest>,"@SP": DEC SP
-				SP <= SP - 1;
+			if Ready = '1' then
+				if Inst(7 downto 5) = "001" and Inst(3 downto 0) = "0010" then
+					SP <= SP - 2;
+				end if;
+				if (Inst = "00010010" or Inst(4 downto 0) = "10001" or ICall = '1') and Last = '1' then
+					-- LCALL, ACALL, ICall
+					SP <= SP + 2;
+				end if;
+				if Inst = "11000000" and PCPaused(0) = '1' then
+					-- 11000000 2 PUSH  data addr		INC SP: MOV "@SP",<src>
+					SP <= SP + 1;
+				end if;
+				if Inst = "11010000" and Last = '1' then
+					-- 11010000 2 POP   data addr		MOV <dest>,"@SP": DEC SP
+					SP <= SP - 1;
+				end if;
 			end if;
 		end if;
 	end process;
@@ -517,46 +520,48 @@ begin
 			RAM_Wr <= '0';
 			RAM_Rd_i <= '0';
 		elsif Clk'event and Clk = '1' then
-			if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
-				P2R <= Res_Bus;
-			end if;
-			if SFR_Wr_i = '1' and Int_AddrA_r = "10000010" then
-				DPL <= Res_Bus;
-			end if;
-			if SFR_Wr_i = '1' and Int_AddrA_r = "10000011" then
-				DPH <= Res_Bus;
-			end if;
-			-- 10010000 3 MOV   DPTR,#data
-			if Inst = "10010000" and FCycle = "10" then
-				DPH <= Inst1;
-			end if;
-			if Inst = "10010000" and FCycle = "11" then
-				DPL <= Inst2;
-			end if;
-			-- 10100011 1 INC   DPTR
-			if INC_DPTR = '1' then
-				tmp := unsigned(DPH) & unsigned(DPL) + 1;
-				DPH <= std_logic_vector(tmp(15 downto 8));
-				DPL <= std_logic_vector(tmp(7 downto 0));
-			end if;
-			INC_DPTR <= '0';
-			if Inst = "10100011" then
-				INC_DPTR <= '1';
-			end if;
-			RAM_Wr <= '0';
-			if Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" then
-				RAM_Wr <= '1';
-			end if;
-			RAM_Rd_i <= '0';
-			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
-				RAM_Rd_i <= '1';
+			if Ready = '1' then
+				if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
+					P2R <= Res_Bus;
+				end if;
+				if SFR_Wr_i = '1' and Int_AddrA_r = "10000010" then
+					DPL <= Res_Bus;
+				end if;
+				if SFR_Wr_i = '1' and Int_AddrA_r = "10000011" then
+					DPH <= Res_Bus;
+				end if;
+				-- 10010000 3 MOV   DPTR,#data
+				if Inst = "10010000" and FCycle = "10" then
+					DPH <= Inst1;
+				end if;
+				if Inst = "10010000" and FCycle = "11" then
+					DPL <= Inst2;
+				end if;
+				-- 10100011 1 INC   DPTR
+				if INC_DPTR = '1' then
+					tmp := unsigned(DPH) & unsigned(DPL) + 1;
+					DPH <= std_logic_vector(tmp(15 downto 8));
+					DPL <= std_logic_vector(tmp(7 downto 0));
+				end if;
+				INC_DPTR <= '0';
+				if Inst = "10100011" then
+					INC_DPTR <= '1';
+				end if;
+				RAM_Wr <= '0';
+				if Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" then
+					RAM_Wr <= '1';
+				end if;
+				RAM_Rd_i <= '0';
+				if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
+					RAM_Rd_i <= '1';
+				end if;
 			end if;
 		end if;
 	end process;
 
 	-- Interrupts
 	SFR_RData <= IP when Int_AddrA = "10111000" else "ZZZZZZZZ";
-	IStart <= Last and IPending;
+	IStart <= Last and IPending and not Inst_Skip;
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
@@ -568,45 +573,47 @@ begin
 			IP <= "00000000";
 			ICall <= '0';
 		elsif Clk'event and Clk = '1' then
-			if SFR_Wr_i = '1' and Int_AddrA_r = "10111000" then
-				IP <= Res_Bus;
-			end if;
-
-			if (Int_Trig and IP(6 downto 0)) /= "0000000" and HPInt = '0' and IPending = '0' and ICall = '0' then
-				Int_Trig_r <= Int_Trig and IP(6 downto 0);
-				IPending <= '1';
-				HPInt <= '1';
-			elsif Int_Trig /= "0000000" and LPInt = '0' and HPInt = '0'  and IPending = '0' and ICall = '0' then
-				IPending <= '1';
-				Int_Trig_r <= Int_Trig;
-				LPInt <= '1';
-			end if;
-			if ICall = '1' then
-				IPending <= '0';
-			end if;
-			if IStart = '1' then
-				ICall <= '1';
-			end if;
-			if ICall = '1' and Last = '1' then
-				ICall <= '0';
-				Int_Trig_r <= (others => '0');
-			end if;
-			Int_Acc <= (others => '0');
-			if IPending = '1' and ICall = '1' then
-				if Int_Trig_r(0) = '1' then Int_Acc(0) <= '1';
-				elsif Int_Trig_r(1) = '1' then Int_Acc(1) <= '1';
-				elsif Int_Trig_r(2) = '1' then Int_Acc(2) <= '1';
-				elsif Int_Trig_r(3) = '1' then Int_Acc(3) <= '1';
-				elsif Int_Trig_r(4) = '1' then Int_Acc(4) <= '1';
-				elsif Int_Trig_r(5) = '1' then Int_Acc(5) <= '1';
-				elsif Int_Trig_r(6) = '1' then Int_Acc(6) <= '1';
+			if Ready = '1' then
+				if SFR_Wr_i = '1' and Int_AddrA_r = "10111000" then
+					IP <= Res_Bus;
 				end if;
-			end if;
-			if Inst = "00110010" then
-				if HPInt = '0' then
-					LPInt <= '0';
-				else
-					HPInt <= '0';
+
+				if (Int_Trig and IP(6 downto 0)) /= "0000000" and HPInt = '0' and IPending = '0' and ICall = '0' then
+					Int_Trig_r <= Int_Trig and IP(6 downto 0);
+					IPending <= '1';
+					HPInt <= '1';
+				elsif Int_Trig /= "0000000" and LPInt = '0' and HPInt = '0'  and IPending = '0' and ICall = '0' then
+					IPending <= '1';
+					Int_Trig_r <= Int_Trig;
+					LPInt <= '1';
+				end if;
+				if ICall = '1' then
+					IPending <= '0';
+				end if;
+				if IStart = '1' then
+					ICall <= '1';
+				end if;
+				if ICall = '1' and Last = '1' then
+					ICall <= '0';
+					Int_Trig_r <= (others => '0');
+				end if;
+				Int_Acc <= (others => '0');
+				if IPending = '1' and ICall = '1' then
+					if Int_Trig_r(0) = '1' then Int_Acc(0) <= '1';
+					elsif Int_Trig_r(1) = '1' then Int_Acc(1) <= '1';
+					elsif Int_Trig_r(2) = '1' then Int_Acc(2) <= '1';
+					elsif Int_Trig_r(3) = '1' then Int_Acc(3) <= '1';
+					elsif Int_Trig_r(4) = '1' then Int_Acc(4) <= '1';
+					elsif Int_Trig_r(5) = '1' then Int_Acc(5) <= '1';
+					elsif Int_Trig_r(6) = '1' then Int_Acc(6) <= '1';
+					end if;
+				end if;
+				if Inst = "00110010" then
+					if HPInt = '0' then
+						LPInt <= '0';
+					else
+						HPInt <= '0';
+					end if;
 				end if;
 			end if;
 		end if;
@@ -617,44 +624,48 @@ begin
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
-			PC <= (others => '1');
+			PC <= (others => '0');
 			OPC <= (others => '0');
 			FCycle <= "01";
 			RET_r <= '0';
 			PCPaused <= (others => '0');
 		elsif Clk'event and Clk = '1' then
-			PC <= NPC;
-			RET_r <= RET;
+			if Ready = '1' then
+				PC <= NPC;
+				RET_r <= RET;
 
-			if PCPause = '1' then
-				PCPaused <= std_logic_vector(unsigned(PCPaused) + 1);
-			else
-				PCPaused <= (others => '0');
-			end if;
-
-			if PCPause = '0' then
-				FCycle <= std_logic_vector(unsigned(FCycle) + 1);
-				if Last = '1' then
-					FCycle <= "01";
+				if PCPause = '1' then
+					PCPaused <= std_logic_vector(unsigned(PCPaused) + 1);
+				else
+					PCPaused <= (others => '0');
 				end if;
-			end if;
 
-			if Inst(7 downto 5) = "100" and Inst(3 downto 0) = "0011" then -- MOVC
-				if FCycle = "01" then
-					OPC <= PC;
+				if PCPause = '0' then
+					FCycle <= std_logic_vector(unsigned(FCycle) + 1);
+					if Last = '1' then
+						FCycle <= "01";
+					end if;
+				end if;
+
+				if Inst(7 downto 5) = "100" and Inst(3 downto 0) = "0011" then -- MOVC
+					if FCycle = "01" then
+						OPC <= PC;
+					end if;
 				end if;
 			end if;
 		end if;
 	end process;
-	process (FCycle, Inst, Inst2, PSW, Res_Bus, PC, OPC, Inst1, ROM_Data,
+	process (FCycle, Inst, Inst2, CJNE, DJNZ, PC, OPC, Inst1, ROM_Data,
 			Next_PSW7, Next_ACC_Z, DPL, DPH, ACC, PCPaused, Op_A, Mem_A,Mem_B,
-			Bit_Pattern, Ri_Stall, PSW_Stall, RET_r, Div_Rdy, ICall, Int_Trig_r)
+			Bit_Pattern, Ri_Stall, PSW_Stall, RET_r, Div_Rdy, ICall,
+			Int_Trig_r, Ready, Rst_r_n)
 	begin
 		NPC <= PC;
 		J_Skip <= '0';
 		RET <= '0';
 		PCPause <= '0';
 		if (Inst(7 downto 5) = "110" and Inst(3 downto 0) = "0000" and FCycle = "01" and PCPaused(0) = '0') or -- PUSH, POP
+			(Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and not DualBus and PCPaused(0) = '0') or -- Single bus MOVX
 			(Inst = "10000100" and (PCPaused(3 downto 1) = "000" or Div_Rdy = '0')) then -- DIV
 			PCPause <= '1';
 		else
@@ -678,7 +689,7 @@ begin
 				(Inst = "01010000" and Next_PSW7 = '0') or -- JNC
 				(Inst = "01100000" and Next_ACC_Z = '1') or -- JZ
 				(Inst = "01110000" and Next_ACC_Z = '0') or -- JNZ
-				(Inst(7 downto 3) = "11011" and Res_Bus /= "00000000") or -- DJNZ
+				(Inst(7 downto 3) = "11011" and DJNZ = '1') or -- DJNZ
 				Inst = "10000000" then -- SJMP
 				NPC <= PC + unsigned(resize(signed(Inst1),16));
 				J_Skip <= '1';
@@ -694,11 +705,11 @@ begin
 				NPC <= PC + unsigned(resize(signed(Inst2),16));
 				J_Skip <= '1';
 			end if;
-			if Inst(7 downto 4) = "1011" and Inst(3 downto 2) /= "00" and Res_Bus /= "00000000" then -- CJNE
+			if Inst(7 downto 4) = "1011" and Inst(3 downto 2) /= "00" and CJNE = '1' then -- CJNE
 				NPC <= PC + unsigned(resize(signed(Inst2),16));
 				J_Skip <= '1';
 			end if;
-			if Inst = "11010101" and Res_Bus /= "00000000" then -- DJNZ
+			if Inst = "11010101" and DJNZ = '1' then -- DJNZ
 				NPC <= PC + unsigned(resize(signed(Inst2),16));
 				J_Skip <= '1';
 			end if;
@@ -751,6 +762,13 @@ begin
 		if RET_r = '1' then -- and unsigned(Mem_A) /= PC(15 downto 8) then ???????????????????????????
 			NPC <= unsigned(Mem_A) & unsigned(Mem_B);
 		end if;
+
+		if Ready = '0' then
+			NPC <= PC;
+		end if;
+		if Rst_r_n = '0' then
+			NPC <= (others => '0');
+		end if;
 	end process;
 
 	-- ALU
@@ -769,13 +787,15 @@ begin
 			ACC_Q => ACC_Q,
 			B_Q => B_Q,
 			IDCPBL_Q =>	Res_Bus,
+			Div_Rdy => Div_Rdy,
+			CJNE => CJNE,
+			DJNZ => DJNZ,
 			CY_Out => Status_D(7),
 			AC_Out => Status_D(6),
 			OV_Out => Status_D(5),
 			CY_Wr => Status_Wr(7),
 			AC_Wr => Status_Wr(6),
-			OV_Wr => Status_Wr(5),
-			Div_Rdy => Div_Rdy);
+			OV_Wr => Status_Wr(5));
 
 	process (Clk)
 	begin
@@ -786,6 +806,9 @@ begin
 					PCC <= std_logic_vector(PC + 2);
 				else
 					PCC <= std_logic_vector(PC + 1);
+				end if;
+				if ICall = '1' then
+					PCC <= std_logic_vector(PC - 1);
 				end if;
 			end if;
 			SFR_RData_r <= SFR_RData;
@@ -798,6 +821,7 @@ begin
 		port map(
 			Clk => Clk,
 			Rst_n => Rst_n,
+			ARE => Ready,
 			Wr => Mem_Wr,
 			DIn => Mem_Din,
 			Int_AddrA => Int_AddrA,
