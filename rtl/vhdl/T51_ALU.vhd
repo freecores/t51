@@ -280,8 +280,8 @@ begin
 				-- 01110100 2 MOV   A,#data
 				-- 10000011 1 MOVC  A,@A+PC		-- Not handled here
 				-- 10010011 1 MOVC  A,@A+DPTR	-- Not handled here
-				-- 11100000 1 MOVX  A,@DPTR		-- unsupported !!!!!!!!!!!!!!!!
-				-- 1110001i 1 MOVX  A,@Ri		-- unsupported !!!!!!!!!!!!!!!!
+				-- 11100000 1 MOVX  A,@DPTR
+				-- 1110001i 1 MOVX  A,@Ri
 				-- 11100101 2 MOV   A,data addr
 				-- 1110011i 1 MOV   A,@Ri
 				-- 11101rrr 1 MOV   A,Rn
