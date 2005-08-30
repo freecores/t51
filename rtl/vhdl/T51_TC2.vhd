@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0219
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -51,7 +52,8 @@ use IEEE.numeric_std.all;
 
 entity T51_TC2 is
 	generic(
-		FastCount	: boolean
+		FastCount	: integer := 0;
+		tristate  : integer := 1
 	);
 	port(
 		Clk			: in std_logic;
@@ -89,16 +91,28 @@ architecture rtl of T51_TC2 is
 
 begin
 
-	F <= TCON(6);
+	F     <= TCON(6) or TCON(7);
 	UseR2 <= TCON(5);
 	UseT2 <= TCON(4);
 
 	-- Registers and counter
-	Data_Out <= Cnt(15 downto 8) when H_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= Cnt(7 downto 0) when L_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= Cpt(15 downto 8) when CH_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= Cpt(7 downto 0) when CL_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= TCON when C_Sel = '1' else "ZZZZZZZZ";
+	tristate_mux: if tristate/=0 generate
+  	Data_Out <= Cnt(15 downto 8) when H_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= Cnt(7 downto 0) when L_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= Cpt(15 downto 8) when CH_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= Cpt(7 downto 0) when CL_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= TCON when C_Sel = '1' else "ZZZZZZZZ";
+	end generate;
+	
+	std_mux: if tristate=0 generate
+	Data_Out <= Cnt(15 downto 8) when H_Sel = '1' else 
+	            Cnt(7 downto 0) when L_Sel = '1' else 
+	            Cpt(15 downto 8) when CH_Sel = '1' else
+	            Cpt(7 downto 0) when CL_Sel = '1' else
+	            TCON when C_Sel = '1' else 
+	            (others =>'-');
+	end generate;
+	
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
@@ -107,7 +121,7 @@ begin
 			Cpt <= (others => '0');
 			UART_Clk <= '0';
 		elsif Clk'event and Clk = '1' then
-			TCON(7) <= '0';
+--			TCON(7) <= '0';
 			UART_Clk <= '0';
 			if Tick = '1' then
 				Cnt <= std_logic_vector(unsigned(Cnt) + 1);
@@ -190,7 +204,7 @@ begin
 			else
 				Prescaler := Prescaler + 1;
 			end if;
-			if FastCount then
+			if FastCount/=0 then
 				Tick12 <= '1';
 			end if;
 		end if;

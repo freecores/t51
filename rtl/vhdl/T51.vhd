@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0222
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -52,32 +53,39 @@ use work.T51_Pack.all;
 
 entity T51 is
 	generic(
-		DualBus : boolean := false;
-		RAMAddressWidth : integer := 8
+		DualBus         : integer := 1; -- FALSE: single bus movx 
+		RAMAddressWidth : integer := 8;
+		SecondDPTR      : integer := 0;
+		tristate        : integer := 1;
+		fast_cpu        : integer := 0
 	);
 	port(
-		Clk			: in std_logic;
-		Rst_n		: in std_logic;
-		Ready		: in std_logic;
-		ROM_Addr	: out std_logic_vector(15 downto 0);
-		ROM_Data	: in std_logic_vector(7 downto 0);
-		RAM_Addr	: out std_logic_vector(15 downto 0);
-		RAM_RData	: in std_logic_vector(7 downto 0);
-		RAM_WData	: out std_logic_vector(7 downto 0);
-		RAM_Cycle	: out std_logic;
-		RAM_Rd		: out std_logic;
-		RAM_Wr		: out std_logic;
-		Int_Trig	: in std_logic_vector(6 downto 0);
-		Int_Acc		: out std_logic_vector(6 downto 0);
-		SFR_Rd_RMW	: out std_logic;
-		SFR_Wr		: out std_logic;
-		SFR_Addr	: out std_logic_vector(6 downto 0);
-		SFR_WData	: out std_logic_vector(7 downto 0);
-		SFR_RData	: inout std_logic_vector(7 downto 0)
+		Clk			     : in std_logic;
+		Rst_n		     : in std_logic;
+		Ready		     : in std_logic;
+		ROM_Addr	   : out std_logic_vector(15 downto 0);
+		ROM_Data	   : in std_logic_vector(7 downto 0);
+		RAM_Addr	   : out std_logic_vector(15 downto 0);
+		RAM_RData	   : in std_logic_vector(7 downto 0);
+		RAM_WData	   : out std_logic_vector(7 downto 0);
+		RAM_Cycle	   : out std_logic;
+		RAM_Rd		   : out std_logic;
+		RAM_Wr		   : out std_logic;
+		Int_Trig	   : in std_logic_vector(6 downto 0);
+		Int_Acc		   : out std_logic_vector(6 downto 0);
+		SFR_Rd_RMW	 : out std_logic;
+		SFR_Wr		   : out std_logic;
+		SFR_Addr	   : out std_logic_vector(6 downto 0);
+		SFR_WData	   : out std_logic_vector(7 downto 0);
+		SFR_RData_in : in  std_logic_vector(7 downto 0);
+		IRAM_Wr      : out std_logic;
+		IRAM_Addr	   : out std_logic_vector(7 downto 0);
+		IRAM_WData   : out std_logic_vector(7 downto 0)
 	);
 end T51;
 
 architecture rtl of T51 is
+  constant Altera_IRAM_c : boolean :=false;
 
 	-- Registers
 	signal	ACC				: std_logic_vector(7 downto 0);
@@ -86,8 +94,14 @@ architecture rtl of T51 is
 	signal	PSW0			: std_logic;
 	signal	IP				: std_logic_vector(7 downto 0);
 	signal	SP				: unsigned(7 downto 0);
-	signal	DPL				: std_logic_vector(7 downto 0);	-- DPTR
-	signal	DPH				: std_logic_vector(7 downto 0);	-- DPTR
+	signal	DPL0			: std_logic_vector(7 downto 0);	-- DPTR 0
+	signal	DPH0			: std_logic_vector(7 downto 0);	-- DPTR 0
+  signal	DPL1			: std_logic_vector(7 downto 0);	-- DPTR 1
+	signal	DPH1			: std_logic_vector(7 downto 0);	-- DPTR 1
+	signal	DPL			  : std_logic_vector(7 downto 0);	-- current DPTR
+	signal	DPH			  : std_logic_vector(7 downto 0);	-- current DPTR
+	signal  DPS,next_DPS  : std_logic;
+	signal  DPS_r     : std_logic;
 	signal	PC				: unsigned(15 downto 0);
 	signal	P2R				: std_logic_vector(7 downto 0);
 
@@ -118,14 +132,20 @@ architecture rtl of T51 is
 	signal	RET_r			: std_logic;
 	signal	RET				: std_logic;
 
+  signal  Stall_pipe  : std_logic;
 	signal	Ri_Stall		: std_logic;
 	signal	PSW_Stall		: std_logic;
+	signal  ACC_Stall   : std_logic;
+	signal  SP_Stall    : std_logic;
+	signal  iReady      : std_logic;
 
 	signal	Next_PSW7		: std_logic;
 	signal	Next_ACC_Z		: std_logic;
 	signal	ACC_Wr			: std_logic;
+	signal  B_Wr        : std_logic;
 
 	signal	SFR_RData_r		: std_logic_vector(7 downto 0);
+	signal	SFR_RData 		: std_logic_vector(7 downto 0);
 
 	signal	Mem_Din			: std_logic_vector(7 downto 0);
 
@@ -163,16 +183,31 @@ architecture rtl of T51 is
 	signal	RMux_PCL		: std_logic;
 	signal	RMux_PCH		: std_logic;
 
+  signal  next_Mem_Wr : std_logic;
+
+  signal rd_flag,xxx_flag : std_logic;
+  signal rd_flag_r        : std_ulogic;
+  signal rd_sfr_flag      : std_logic;
+  signal Do_ACC_Wr        : std_logic;
 begin
+
+  iReady <= Ready and not xxx_flag;
 
 	Last <= '1' when ICall = '1' and FCycle = "11" else
 			'0' when ICall = '1' else
-			'1' when MCode(1 downto 0) = FCycle and Ready = '1' else '0';
+			'1' when MCode(1 downto 0) = FCycle and iReady = '1' else 
+			'0';
 
-	process (ROM_Data, ICall, Inst, Inst1, Inst2, Last, FCycle, PSW, Mem_B, SP, Old_Mem_B, Ready, Int_AddrA_r)
+  --      (ROM_Data, ICall, Inst, Inst1, Inst2, Last, FCycle, PSW, Mem_B, SP, Old_Mem_B, Ready, Int_AddrA_r)
+	process (FCycle, ICall, Inst, Inst1, Inst2, Int_AddrA_r, Last, Mem_B, Old_Mem_B, PSW,
+             ROM_Data, Ready, SP, SFR_Wr_i, Res_Bus)
 	begin
 		Int_AddrA <= "--------";
-		Int_AddrB <= "--------";
+--		Int_AddrB <= "--------";
+    Int_AddrB <= "000" & PSW(4 downto 3) & "00" & Inst(0);
+	  rd_flag     <= '0';
+	  rd_sfr_flag <= '0'; 
+
 		if Inst(3 downto 0) = "0000" or Inst(3 downto 0) = "0010" then
 			if Inst(3 downto 0) = "0000" or (Inst(3 downto 0) = "0010" and (Inst(7) = '1' or Inst(6 downto 4) = "111")) then
 				if Inst1(7) = '0' then
@@ -228,17 +263,18 @@ begin
 			else
 				Int_AddrA <= Inst1;
 			end if;
-		elsif Inst(3 downto 1) = "011" then
+		elsif Inst(3 downto 1) = "011" then   -- @Ri Adressing mode
 			if FCycle(1 downto 0) = "01" then
 				Int_AddrA <= Mem_B;
 			else
 				Int_AddrA <= Old_Mem_B;
 			end if;
 			if Inst(7 downto 4) = "1000" and FCycle = "10" then
-				Int_AddrA <= Inst1;
+				Int_AddrA <= Inst1;   -- mov direct,@Ri
 			end if;
 			if Inst(7 downto 4) = "1010" and FCycle = "01" then
-				Int_AddrA <= ROM_Data;
+			  Int_AddrA <= ROM_Data;  -- mov @Ri,direct
+				rd_flag   <= '1';
 			end if;
 		elsif Inst(3) = '1' then
 			Int_AddrA <= "000" & PSW(4 downto 3) & Inst(2 downto 0);
@@ -246,23 +282,50 @@ begin
 				Int_AddrA <= Inst1;
 			end if;
 			if Inst(7 downto 4) = "1010" and FCycle = "01" then
-				Int_AddrA <= ROM_Data;
+  		  Int_AddrA <= ROM_Data;  -- mov Ri,data
+				rd_flag   <= '1';
 			end if;
 		end if;
-		if Last = '1' then
-			if ROM_Data(3 downto 1) = "011" then
-				Int_AddrB <= "000" & PSW(4 downto 3) & "00" & ROM_Data(0);
+		
+--		if Last = '1' then
+     -- Modified by AVG
+      if (Inst(7 downto 5) /= "001" or Inst(3 downto 0) /= "0010") and -- not a RET, RETI
+        (ROM_Data(3 downto 1) = "011" or -- Next or current Instruction has @Ri Addressing Mode
+         Inst(3 downto 1) = "011" or
+         ROM_Data(7 downto 1)="1110001" or ROM_Data(7 downto 1)="1111001") then  -- MOVX @Ri,A ; MOVX A,@Ri
+        if Last = '1' then 
+				  Int_AddrB   <= "000" & PSW(4 downto 3) & "00" & ROM_Data(0);
+  				-- write to psw is in progress => forward argument
+  				-- decreases timing !!!
+  				if fast_cpu/=0 and SFR_Wr_i = '1' and Int_AddrA_r = "11010000" then
+  				  Int_AddrB <= "000" & Res_Bus(4 downto 3) & "00" & ROM_Data(0);
+  				end if;
+				end if;
+				rd_sfr_flag <= '1';
+
 			end if;
-		end if;
+--		end if;
+--		if Inst(7 downto 1) = "1011011" then  -- cjne @ri,#im
+--		  Int_AddrB <= "000" & PSW(4 downto 3) & "00" & Inst(0);
+--		end if;
+		
 		if Ready = '0' then
 			Int_AddrA <= Int_AddrA_r;
 		end if;
 	end process;
-	Op_A <= SFR_RData_r when AMux_SFR = '1' else Mem_A;
-	Op_B <= Inst2 when BMux_Inst2 = '1' else Inst1;
+
+	Op_A <= SFR_RData_r when AMux_SFR = '1' else
+	        Mem_A;
+	
+	Op_B <= Inst2 when BMux_Inst2 = '1' else 
+	        Inst1;
+	
+	-- Store return Address to mem (Stack) when a call (or interrupt) occured
 	Mem_Din <= PCC(7 downto 0) when RMux_PCL = '1' else
 			PCC(15 downto 8) when RMux_PCH = '1' else
 			Res_Bus;
+			
+			
 	process (Clk)
 	begin
 		if Clk'event and Clk = '1' then
@@ -274,17 +337,18 @@ begin
 			if Int_AddrA(7) = '1' then
 				AMux_SFR <= '1';
 			end if;
-			if Inst(3 downto 1) = "011" then
-				if not (Inst(7 downto 4) = "1010" and FCycle = "10") then
+			if Inst(3 downto 1) = "011" then -- relative addressing mode
+			  -- not "mov @ri,direct"
+				if not (Inst(7 downto 4) = "1010") then -- and FCycle = "10") then
 					-- Indirect addressing
 					AMux_SFR <= '0';
 				end if;
 			end if;
 			if Inst = "11010000" then
 				-- 11010000 2 POP   data addr		MOV <dest>,"@SP": DEC SP
-				if FCycle = "10" then
+--				if FCycle = "10" then
 					AMux_SFR <= '0';
-				end if;
+--				end if;
 			end if;
 
 			if Inst(3 downto 0) = "0011" or Inst(3 downto 0) = "0101" then
@@ -301,17 +365,33 @@ begin
 			end if;
 		end if;
 	end process;
+	
 	SFR_Wr <= SFR_Wr_i;
 	SFR_Addr <= Int_AddrA(6 downto 0);
 	SFR_WData <= Res_Bus;
-	SFR_Rd_RMW <= '1' when Last = '1' and MCode(3) = '1' and Int_AddrA(7) = '1' and (Inst(7 downto 4) = "1000" or Inst(3 downto 1) /= "011") else '0';
+	
+	SFR_Rd_RMW <= '1' when Last = '1' and MCode(3) = '1' and Int_AddrA(7) = '1' and
+	                       (Inst(7 downto 4) = "1000" or Inst(3 downto 1) /= "011") and
+	                       Inst /= "11000000" else -- no push
+	              '0';
+	
+	next_Mem_Wr <= '1' when Last = '1' and MCode(3) = '1' and  
+	                        (Int_AddrA(7) = '0' or  
+	                        -- Instruction is no MOV and indirect addressing mode
+	                        (Inst(7 downto 4) /= "1000" and Inst(3 downto 1) = "011") or
+	                        Inst = "11000000" ) else  -- PUSH Instruction
+	               '0';
+	
+	
 	process (Clk)
 	begin
 		if Clk'event and Clk = '1' then
 			SFR_Wr_i <= '0';
 			Mem_Wr <= '0';
 			if Last = '1' and MCode(3) = '1' then
-				if Int_AddrA(7) = '1' and (Inst(7 downto 4) = "1000" or Inst(3 downto 1) /= "011") then
+			  -- MOV or no indirect addressing
+				if Int_AddrA(7) = '1' and (Inst(7 downto 4) = "1000" or Inst(3 downto 1) /= "011") and
+				   Inst /= "11000000"  then
 					-- Direct addressing
 					SFR_Wr_i <= '1';
 				else
@@ -320,7 +400,7 @@ begin
 			end if;
 
 			-- LCALL, ACALL, Int
-			if Ready = '1' and (Inst = "00010010" or Inst(4 downto 0) = "10001" or ICall = '1') then
+			if iReady = '1' and (Inst = "00010010" or Inst(4 downto 0) = "10001" or ICall = '1') then
 				if FCycle /= "11" then -- LCALL
 					Mem_Wr <= '1';
 				end if;
@@ -330,15 +410,57 @@ begin
 
 	-- Instruction register
 	Inst_Skip <= RET_r or J_Skip; -- '1' when (RET_r = '1' and unsigned(Mem_B) /= PC(15 downto 8)) else J_Skip; ????????????
-	Ri_Stall <= '1' when Inst /= "00000000" and
-				Int_AddrA = "000" & PSW(4 downto 3) & Inst(2 downto 0) and
-				ROM_Data(3 downto 1) = "011" and
-				Last = '1' and MCode(3) = '1' else '0';
-	PSW_Stall <= '1' when Inst /= "00000000" and
-				Int_AddrA = "11100000" and -- to restrictive, will stall on memory access also !!!!!!!!!!
-				(ROM_Data(3 downto 1) = "011" or ROM_Data(3) = '1') and
-				Last = '1' and MCode(3) = '1' else '0';
+--	Ri_Stall <= '1' when Inst /= "00000000" and
+--				Int_AddrA = "000" & PSW(4 downto 3) & Inst(2 downto 0) and  --Write to Ri in Progress
+--				ROM_Data(3 downto 1) = "011" and  --@Ri at next opcode
+--				Last = '1' and MCode(3) = '1' else '0';
+
+-- WHEN MCODE(3)==1 => Write to Memory or FSR is in Progress
+
+  -- Modified by AVG
+  Ri_Stall <= '1' when Inst /= "00000000" and 
+                      next_Mem_Wr ='1' and 
+                      (Int_AddrA = "000" & PSW(4 downto 3) & "00"&ROM_Data(0) and
+                       (ROM_Data(3 downto 1) = "011" or -- @Ri at next opcode 
+                        ROM_Data(7 downto 1)="1110001" or -- movx a,@ri at next opcode
+                        ROM_Data(7 downto 1)="1111001")) -- movx @ri,a at next opcod
+              else '0'; 
+
+-- WHEN MCODE(3)==1 => Write to Memory or FSR is in Progress			
+  -- Modified by AVG
+	PSW_Stall <= '1' when Int_AddrA = "11010000" and 
+	                      next_Mem_Wr='0' and -- PSW Adressed and no memory write
+              				  (ROM_Data(3 downto 1) = "011" or  -- @Ri at next opcode
+              				   ROM_Data(3) = '1') and           -- Rx at next opcode
+              				  Last = '1' and 
+              				  MCode(3) = '1' else 
+              '0';
+
+-- WHEN MCODE(2)==1 => Write to ACC in Progress	
+-- Stall Pipe when Write to ACC is in Progress and next Instruction is JMP @A+DPTR	
+-- Modified by AVG
+	ACC_Stall <= '1' when ROM_Data = "01110011" and
+	                      Last = '1' and MCode(2) = '1' else
+	             '0';
+	             
+	-- when a write to SP is in progress
+	-- and next opcode is a call or interrupt
+	-- -> stall pipe (nop insertion)                      
+	-- Modified by AVG
+	SP_Stall <= '1' when Last = '1' and MCode(3) = '1' and
+				          Int_AddrA = "10000001" and 
+				          (Inst(7 downto 4) = "1000" or     -- mov opcode
+				           Inst(3 downto 1) /= "011") and   -- and no indirect addressing
+				           Inst /= "11000000" and           -- and not PUSH
+				          (ROM_Data = "00010010" or 
+				           ROM_Data(4 downto 0) = "10001" or 
+				           IStart = '1') else -- LCALL, ACALL, Int
+				     '0';
+		                
+	Stall_pipe <= Ri_Stall or PSW_Stall or ACC_Stall or SP_Stall;
+				
 	process (Rst_n, Clk)
+	  variable bitnr_v : natural range 0 to 7;
 	begin
 		if Rst_n = '0' then
 			Rst_r_n <= '0';
@@ -348,8 +470,11 @@ begin
 			Bit_Pattern <= "00000000";
 		elsif Clk'event and Clk = '1' then
 			Rst_r_n <= '1';
-			if Ready = '0' then
-			elsif Rst_r_n = '0' or Inst_Skip = '1' or IStart = '1' or Ri_Stall = '1' or PSW_Stall = '1' then
+			if iReady = '0' then
+			elsif Rst_r_n = '0' or 
+			      Inst_Skip = '1' or IStart = '1' or 
+			      Stall_pipe = '1' then
+--			      Ri_Stall = '1' or PSW_Stall = '1' or ACC_Stall = '1' then
 				-- Skip/Stall/Flush: NOP insertion
 				Inst <= (others => '0');
 			elsif Inst = "10000100" and PCPause = '1' then
@@ -365,47 +490,98 @@ begin
 				end if;
 			end if;
 			if FCycle = "01" then
-				case ROM_Data(2 downto 0) is
-				when "000" =>
-					Bit_Pattern <= "00000001";
-				when "001" =>
-					Bit_Pattern <= "00000010";
-				when "010" =>
-					Bit_Pattern <= "00000100";
-				when "011" =>
-					Bit_Pattern <= "00001000";
-				when "100" =>
-					Bit_Pattern <= "00010000";
-				when "101" =>
-					Bit_Pattern <= "00100000";
-				when "110" =>
-					Bit_Pattern <= "01000000";
-				when others =>
-					Bit_Pattern <= "10000000";
-				end case;
+			  Bit_Pattern <= "00000000";
+			  bitnr_v := to_integer(unsigned(ROM_Data(2 downto 0)));
+			  Bit_Pattern(bitnr_v) <= '1';
+			  
+--				case ROM_Data(2 downto 0) is
+--				when "000" =>
+--					Bit_Pattern <= "00000001";
+--				when "001" =>
+--					Bit_Pattern <= "00000010";
+--				when "010" =>
+--					Bit_Pattern <= "00000100";
+--				when "011" =>
+--					Bit_Pattern <= "00001000";
+--				when "100" =>
+--					Bit_Pattern <= "00010000";
+--				when "101" =>
+--					Bit_Pattern <= "00100000";
+--				when "110" =>
+--					Bit_Pattern <= "01000000";
+--				when others =>
+--					Bit_Pattern <= "10000000";
+--				end case;
 			end if;
 		end if;
 	end process;
 
 	-- Accumulator, B and status register
-	SFR_RData <= PSW & PSW0 when Int_AddrA = "11010000" else "ZZZZZZZZ";
-	SFR_RData <= ACC when Int_AddrA = "11100000" else "ZZZZZZZZ";
-	SFR_RData <= B when Int_AddrA = "11110000" else "ZZZZZZZZ";
+	tristate_mux: if tristate/=0 generate
+  	SFR_RData <= PSW & PSW0 when Int_AddrA = "11010000" else "ZZZZZZZZ";
+  	SFR_RData <= ACC when Int_AddrA = "11100000" else "ZZZZZZZZ";
+  	SFR_RData <= B when Int_AddrA = "11110000" else "ZZZZZZZZ";
+  	-- Stack pointer
+  	SFR_RData <= std_logic_vector(SP) when Int_AddrA = "10000001" else "ZZZZZZZZ";
+  	
+    SFR_RData <= DPL1 when SecondDPTR/=0 and Int_AddrA = "10000100" else "ZZZZZZZZ";
+  	SFR_RData <= DPH1 when SecondDPTR/=0 and Int_AddrA = "10000101" else "ZZZZZZZZ";
+  	SFR_RData <= "0000000"&DPS when SecondDPTR/=0 and Int_AddrA = "10000110" else "ZZZZZZZZ";
+  	
+  	SFR_RData <= DPL0 when Int_AddrA = "10000010" else "ZZZZZZZZ";
+  	SFR_RData <= DPH0 when Int_AddrA = "10000011" else "ZZZZZZZZ";
+  	SFR_RData <= IP when Int_AddrA = "10111000" else "ZZZZZZZZ";
+  	SFR_RData <= SFR_RData_in;
+  end generate;
+	
+	std_mux: if tristate=0 generate
+	  SFR_RData <= PSW & PSW0 when Int_AddrA = "11010000" else 
+  	             ACC when Int_AddrA = "11100000" else 
+  	             B when Int_AddrA = "11110000" else 
+  	             std_logic_vector(SP) when Int_AddrA = "10000001" else 
+  	             
+                 DPL1 when SecondDPTR/=0 and Int_AddrA = "10000100" else 
+  	             DPH1 when SecondDPTR/=0 and Int_AddrA = "10000101" else 
+  	             "0000000"&DPS when SecondDPTR/=0 and Int_AddrA = "10000110" else 
+  	             
+  	             DPL0 when Int_AddrA = "10000010" else 
+  	             DPH0 when Int_AddrA = "10000011" else 
+  	             IP when Int_AddrA = "10111000" else 
+  	             SFR_RData_in;
+
+ -- 	-- is it an internal or external read                 
+ --   Int_Read <= '1' when Int_AddrA = "11010000" or 
+ -- 	                     Int_AddrA = "11100000" or 
+ -- 	                     Int_AddrA = "11110000" or 
+ -- 	                     Int_AddrA = "10000001" or 
+ -- 	                     
+ --                        (SecondDPTR and Int_AddrA = "10000100") or 
+ -- 	                     (SecondDPTR and Int_AddrA = "10000101") or 
+ -- 	                     (SecondDPTR and Int_AddrA = "10000110") or 
+ -- 	                     
+ -- 	                     Int_AddrA = "10000010" or 
+ -- 	                     Int_AddrA = "10000011" or 
+ -- 	                     Int_AddrA = "10111000" else 
+ -- 	            '0';
+  
+	end generate;
+	
 	PSW0 <= ACC(7) xor ACC(6) xor ACC(5) xor ACC(4) xor ACC(3) xor ACC(2) xor ACC(1) xor ACC(0);
 	Next_PSW7 <= Res_Bus(7) when SFR_Wr_i = '1' and Int_AddrA_r = "11010000" else
 				Status_D(7) when Status_Wr(7) = '1' else
 				PSW(7);
 	Next_ACC_Z <= '1' when ACC_Q = "00000000" and ACC_Wr = '1' else
 				'1' when ACC = "00000000" else '0';
+				
 	process (Rst_n, Clk)
-		variable B_Wr : std_logic;
+--		variable B_Wr : std_logic;
 	begin
 		if Rst_n = '0' then
 			PSW <= "0000000";
 			ACC <= "00000000";
 			B <= "00000000";
 			ACC_Wr <= '0';
-			B_Wr := '0';
+			B_Wr <= '0';
 		elsif Clk'event and Clk = '1' then
 			if ACC_Wr = '1' then
 				ACC <= ACC_Q;
@@ -419,9 +595,9 @@ begin
 				ACC_Wr <= '0';
 			end if;
 			if ((Inst = "10000100" and PCPause = '0') or Inst = "10100100") and Last = '1' then --  DIV, MUL
-				B_Wr := '1';
+				B_Wr <= '1';
 			else
-				B_Wr := '0';
+				B_Wr <= '0';
 			end if;
 
 			if SFR_Wr_i = '1' and Int_AddrA_r = "11100000" then
@@ -454,8 +630,7 @@ begin
 		end if;
 	end process;
 
-	-- Stack pointer
-	SFR_RData <= std_logic_vector(SP) when Int_AddrA = "10000001" else "ZZZZZZZZ";
+	
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
@@ -464,7 +639,7 @@ begin
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10000001" then
 				SP <= unsigned(Res_Bus);
 			end if;
-			if Ready = '1' then
+			if iReady = '1' then
 				if Inst(7 downto 5) = "001" and Inst(3 downto 0) = "0010" then
 					SP <= SP - 2;
 				end if;
@@ -484,87 +659,196 @@ begin
 		end if;
 	end process;
 
+  twoDPTR: if SecondDPTR/=0 generate
+    next_DPS <= Res_Bus(0) when SFR_Wr_i = '1' and Int_AddrA_r = "10000110" else
+                DPS;
+  
+    DPL <= DPL0 when next_DPS='0' else
+           DPL1;
+    DPH <= DPH0 when next_DPS='0' else
+           DPH1;
+--  	SFR_RData <= DPL1 when Int_AddrA = "10000100" else "ZZZZZZZZ";
+--  	SFR_RData <= DPH1 when Int_AddrA = "10000101" else "ZZZZZZZZ";
+--  	SFR_RData <= "0000000"&DPS when Int_AddrA = "10000110" else "ZZZZZZZZ";
+  end generate;
+  oneDPTR: if SecondDPTR=0 generate
+    DPL <= DPL0;
+    DPH <= DPH0;
+    next_DPS <= '0';
+  end generate;
+  
 	-- DPTR/RAM_Addr
 	RAM_WData <= ACC;
-	process (Inst, P2R, DPH, DPL, Int_AddrA_r, SFR_Wr_i, Res_Bus, INC_DPTR, Mem_B)
+    --(Inst, P2R, DPH, DPL, Int_AddrA_r, SFR_Wr_i, Res_Bus, INC_DPTR, Mem_B)
+	process (DPH, DPL, INC_DPTR, Inst, Int_AddrA_r, Mem_B, P2R, Res_Bus, SFR_Wr_i, DPS)
 	begin
 		RAM_Addr <= DPH & DPL;
 		if Inst(1) = '0' then
-			if SFR_Wr_i = '1' and Int_AddrA_r = "10000010" then
+			if (SFR_Wr_i = '1' and Int_AddrA_r = "10000010" and DPS = '0') or
+			   (SecondDPTR/=0 and SFR_Wr_i = '1' and Int_AddrA_r = "10000100"  and DPS = '1')
+			then
 				RAM_Addr(7 downto 0) <= Res_Bus;
 			end if;
-			if SFR_Wr_i = '1' and Int_AddrA_r = "10000011" then
+			if (SFR_Wr_i = '1' and Int_AddrA_r = "10000011" and DPS = '0') or
+			   (SecondDPTR/=0 and SFR_Wr_i = '1' and Int_AddrA_r = "10000101" and DPS = '1')
+			then
 				RAM_Addr(15 downto 8) <= Res_Bus;
 			end if;
 			-- 10100011 1 INC   DPTR
 			if INC_DPTR = '1' then
 				RAM_Addr <= std_logic_vector(unsigned(DPH) & unsigned(DPL) + 1);
 			end if;
-		else
+		else -- movx a,@ri or movx @ri,a
 			RAM_Addr <= P2R & Mem_B;
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
 				RAM_Addr(15 downto 8) <= Res_Bus;
 			end if;
 		end if;
 	end process;
-	SFR_RData <= DPL when Int_AddrA = "10000010" else "ZZZZZZZZ";
-	SFR_RData <= DPH when Int_AddrA = "10000011" else "ZZZZZZZZ";
-	RAM_Cycle <= '1' when Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and PCPaused(0) = '0' else '0';
+	
+	
+	-- MOVX Instruction
+	RAM_Cycle <= '1' when Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and 
+	                      Inst(1 downto 0) /= "01" and 
+	                      PCPaused(0) = '0' else 
+	             '0';
+	             
 	RAM_Rd <= RAM_Rd_i;
+	
+	Do_ACC_Wr <= '1' when (ACC_Wr or RAM_Rd_i)='1' or
+	                      (SFR_Wr_i = '1' and Int_AddrA_r = "11100000") else
+	             '0';
+
+-- Gefählich sind:
+-- mov @Ri,direct
+-- mov Ri,data
+-- da diese Befehle die Quelldaten einen Takt früher lesen als alle anderen Befehle
+--  	xxx_flag <= '1' when ((SFR_Wr_i and rd_flag)= '1' and Int_AddrA_r=Int_AddrA) or
+--  	                      ((Do_ACC_Wr and rd_flag)='1' and Int_AddrA = "11010000") or
+--  	                      (Status_Wr/="000" and rd_flag='1' and Int_AddrA="11010000") or
+--  	                      (fast_cpu=0 and (rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000") else
+--  	            '0';
+  fast: if fast_cpu/=0 generate
+  	xxx_flag <= '1' when ((SFR_Wr_i and rd_flag)= '1' and Int_AddrA_r=Int_AddrA) or
+  	                      ((Do_ACC_Wr and rd_flag)='1' and Int_AddrA = "11010000") or  -- WR to ACC in Progress and read from 
+  	                      ((B_Wr and rd_flag)= '1' and Int_AddrA = "11110000") or
+  	                      (Status_Wr/="000" and rd_flag='1' and Int_AddrA="11010000") else
+  	            '0';
+	end generate;
+	slow: if fast_cpu=0 generate
+	  -- Inserts an Waitstate on every mov @Ri,direct or mov Ri,data Instruction
+  	xxx_flag <= '1' when (rd_flag and not rd_flag_r)= '1' or 
+  	                     ((rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000") else
+  	            '0';
+    process(Rst_n, Clk)
+    begin
+      if Rst_n = '0' then
+        rd_flag_r <= '0';
+      elsif Clk'event and Clk = '1' then
+        rd_flag_r <= rd_flag;
+      end if;
+    end process;
+  	            
+	end generate;
+	
 	process (Rst_n, Clk)
 		variable tmp : unsigned(15 downto 0);
 	begin
 		if Rst_n = '0' then
 			P2R <= "11111111";
-			DPL <= "00000000";
-			DPH <= "00000000";
+			DPL0 <= "00000000";
+			DPH0 <= "00000000";
 			INC_DPTR <= '0';
 			RAM_Rd_i <= '0';
 			RAM_Wr <= '0';
+			if SecondDPTR/=0 then
+			  DPL1   <= "00000000";
+			  DPH1   <= "00000000";
+			  DPS_r  <= '0';
+			end if;
 		elsif Clk'event and Clk = '1' then
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
 				P2R <= Res_Bus;
 			end if;
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10000010" then
-				DPL <= Res_Bus;
+				DPL0 <= Res_Bus;
 			end if;
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10000011" then
-				DPH <= Res_Bus;
+				DPH0 <= Res_Bus;
 			end if;
-			if Ready = '1' then
-				-- 10010000 3 MOV   DPTR,#data
-				if Inst = "10010000" and FCycle = "10" then
-					DPH <= Inst1;
-				end if;
-				if Inst = "10010000" and FCycle = "11" then
-					DPL <= Inst2;
-				end if;
-				-- 10100011 1 INC   DPTR
-				if INC_DPTR = '1' then
-					tmp := unsigned(DPH) & unsigned(DPL) + 1;
-					DPH <= std_logic_vector(tmp(15 downto 8));
-					DPL <= std_logic_vector(tmp(7 downto 0));
-				end if;
+			if SecondDPTR/=0 then
+  			if SFR_Wr_i = '1' and Int_AddrA_r = "10000100" then
+  				DPL1 <= Res_Bus;
+  			end if;
+  			if SFR_Wr_i = '1' and Int_AddrA_r = "10000101" then
+  				DPH1 <= Res_Bus;
+  			end if;
+  			if SFR_Wr_i = '1' and Int_AddrA_r = "10000110" then
+  				DPS_r <= Res_Bus(0);
+  			end if;
+			end if;
+			if iReady = '1' then
+				if SecondDPTR=0 or 
+				   (SecondDPTR/=0 and DPS='0') then
+				  -- 10010000 3 MOV   DPTR,#data
+  				if Inst = "10010000" and FCycle = "10" then
+  					DPH0 <= Inst1;
+  				end if;
+  				if Inst = "10010000" and FCycle = "11" then
+  					DPL0 <= Inst2;
+  				end if;
+  				-- 10100011 1 INC   DPTR
+  				if INC_DPTR = '1' then
+  					tmp := unsigned(DPH) & unsigned(DPL) + 1;
+  					DPH0 <= std_logic_vector(tmp(15 downto 8));
+  					DPL0 <= std_logic_vector(tmp(7 downto 0));
+  				end if;
+  		  elsif SecondDPTR/=0 and DPS='1' then
+  		    -- 10010000 3 MOV   DPTR,#data
+  		    if Inst = "10010000" and FCycle = "10" then
+  					DPH1 <= Inst1;
+  				end if;
+  				if Inst = "10010000" and FCycle = "11" then
+  					DPL1 <= Inst2;
+  				end if;
+  				-- 10100011 1 INC   DPTR
+  				if INC_DPTR = '1' then
+  					tmp := unsigned(DPH) & unsigned(DPL) + 1;
+  					DPH1 <= std_logic_vector(tmp(15 downto 8));
+  					DPL1 <= std_logic_vector(tmp(7 downto 0));
+  				end if;
+  		  end if;
 				INC_DPTR <= '0';
 				if Inst = "10100011" then
 					INC_DPTR <= '1';
 				end if;
 			end if;
 			RAM_Wr <= '0';
-			if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and DualBus) or
-				(Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and Ready = '0' and not DualBus) then
+			-- movx instruction
+			if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and DualBus/=0) or
+				(Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and iReady = '0' and DualBus=0) then
 				RAM_Wr <= '1';
 			end if;
 			RAM_Rd_i <= '0';
-			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and Ready = '1' then
+--			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and iReady = '1' then
+      if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
 				RAM_Rd_i <= '1';
 			end if;
 		end if;
 	end process;
+  
+  process(DPS_r)
+  begin
+    if SecondDPTR/=0 then
+      DPS <= DPS_r;
+    else
+      DPS <= '0';
+    end if;
+  end process;
 
 	-- Interrupts
-	SFR_RData <= IP when Int_AddrA = "10111000" else "ZZZZZZZZ";
 	IStart <= Last and IPending and not Inst_Skip;
+	
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
@@ -579,7 +863,7 @@ begin
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10111000" then
 				IP <= Res_Bus;
 			end if;
-			if Ready = '1' then
+			if iReady = '1' then
 				if (Int_Trig and IP(6 downto 0)) /= "0000000" and HPInt = '0' and IPending = '0' and ICall = '0' then
 					Int_Trig_r <= Int_Trig and IP(6 downto 0);
 					IPending <= '1';
@@ -592,7 +876,7 @@ begin
 				if ICall = '1' then
 					IPending <= '0';
 				end if;
-				if IStart = '1' then
+				if IStart = '1' and SP_Stall='0' then
 					ICall <= '1';
 				end if;
 				if ICall = '1' and Last = '1' then
@@ -610,7 +894,7 @@ begin
 					elsif Int_Trig_r(6) = '1' then Int_Acc(6) <= '1';
 					end if;
 				end if;
-				if Inst = "00110010" then
+				if Inst = "00110010" then   -- reti
 					if HPInt = '0' then
 						LPInt <= '0';
 					else
@@ -632,7 +916,7 @@ begin
 			RET_r <= '0';
 			PCPaused <= (others => '0');
 		elsif Clk'event and Clk = '1' then
-			if Ready = '1' then
+			if iReady = '1' then
 				PC <= NPC;
 				RET_r <= RET;
 
@@ -657,26 +941,33 @@ begin
 			end if;
 		end if;
 	end process;
-	process (FCycle, Inst, Inst2, CJNE, DJNZ, PC, OPC, Inst1, ROM_Data,
-			Next_PSW7, Next_ACC_Z, DPL, DPH, ACC, PCPaused, Op_A, Mem_A,Mem_B,
-			Bit_Pattern, Ri_Stall, PSW_Stall, RET_r, Div_Rdy, ICall,
-			Int_Trig_r, Ready, Rst_r_n)
+
+--            (FCycle, Inst, Inst2, CJNE, DJNZ, PC, OPC, Inst1, ROM_Data,
+--			Next_PSW7, Next_ACC_Z, DPL, DPH, ACC, PCPaused, Op_A, Mem_A, Mem_B,
+--			Bit_Pattern, Ri_Stall, PSW_Stall, ACC_Stall, RET_r, Div_Rdy, ICall,
+--			Int_Trig_r, Ready, Rst_r_n)
+
+	process (ACC, Bit_Pattern, CJNE, DJNZ, DPH, DPL, Div_Rdy, FCycle, ICall,
+             Inst, Inst1, Inst2, Int_Trig_r, Mem_A, Mem_B, Next_ACC_Z, Next_PSW7, OPC,
+             Op_A, PC, PCPaused, RET_r, ROM_Data, iReady, Rst_r_n, Stall_pipe)
 	begin
 		NPC <= PC;
 		J_Skip <= '0';
 		RET <= '0';
 		PCPause <= '0';
+		-- push,pop
 		if (Inst(7 downto 5) = "110" and Inst(3 downto 0) = "0000" and FCycle = "01" and PCPaused(0) = '0') or -- PUSH, POP
-			(Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and not DualBus and PCPaused(0) = '0') or -- Single bus MOVX
+			(Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or -- Single bus MOVX
 			(Inst = "10000100" and (PCPaused(3 downto 1) = "000" or Div_Rdy = '0')) then -- DIV
 			PCPause <= '1';
 		else
-			if Ri_Stall = '0' and PSW_Stall = '0' then
+--			if Ri_Stall = '0' and PSW_Stall = '0' and ACC_Stall='0' then
+      if Stall_pipe = '0' then
 				NPC <= PC + 1;
 			end if;
 		end if;
 		-- Single bus MOVX
-		if Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and not DualBus then
+		if Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 then
 			J_Skip <= '1';
 		end if;
 		-- Return
@@ -701,6 +992,7 @@ begin
 				J_Skip <= '1';
 			end if;
 		end if;
+		
 		-- 3 byte 8 bit relative jump
 		if FCycle = "11" then
 			if (Inst = "00100000" or Inst = "00010000") and (Bit_Pattern and Op_A) /= "00000000" then -- JB, JBC
@@ -769,7 +1061,7 @@ begin
 			NPC <= unsigned(Mem_A) & unsigned(Mem_B);
 		end if;
 
-		if Ready = '0' then
+		if iReady = '0' then
 			NPC <= PC;
 		end if;
 		if Rst_r_n = '0' then
@@ -779,6 +1071,9 @@ begin
 
 	-- ALU
 	alu : T51_ALU
+	  generic map(
+	    tristate => tristate
+	  )
 		port map(
 			Clk => Clk,
 			Last => Last,
@@ -821,21 +1116,43 @@ begin
 		end if;
 	end process;
 
-	ram : T51_RAM
-		generic map(
-			RAMAddressWidth => RAMAddressWidth)
-		port map(
-			Clk => Clk,
-			Rst_n => Rst_n,
-			ARE => Ready,
-			Wr => Mem_Wr,
-			DIn => Mem_Din,
-			Int_AddrA => Int_AddrA,
-			Int_AddrA_r => Int_AddrA_r,
-			Int_AddrB => Int_AddrB,
-			Mem_A => Mem_A,
-			Mem_B => Mem_B);
-
+	Generic_MODEL: if not Altera_IRAM_c generate
+  	ram : T51_RAM
+  		generic map(
+  			RAMAddressWidth => RAMAddressWidth)
+  		port map(
+  			Clk => Clk,
+  			Rst_n => Rst_n,
+  			ARE => Ready,
+  			Wr => Mem_Wr,
+  			DIn => Mem_Din,
+  			Int_AddrA => Int_AddrA,
+  			Int_AddrA_r => Int_AddrA_r,
+  			Int_AddrB => Int_AddrB,
+  			Mem_A => Mem_A,
+  			Mem_B => Mem_B);
+  end generate;
+  Altera_MODEL: if Altera_IRAM_c generate
+  	ram : T51_RAM_Altera
+  		generic map(
+  			RAMAddressWidth => RAMAddressWidth)
+  		port map(
+  			Clk => Clk,
+  			Rst_n => Rst_n,
+  			ARE => Ready,
+  			Wr => Mem_Wr,
+  			DIn => Mem_Din,
+  			Int_AddrA => Int_AddrA,
+  			Int_AddrA_r => Int_AddrA_r,
+  			Int_AddrB => Int_AddrB,
+  			Mem_A => Mem_A,
+  			Mem_B => Mem_B);
+  end generate;
+  
+  IRAM_Wr    <= Mem_Wr;
+  IRAM_Addr  <= Int_AddrA_r;
+  IRAM_WData <= Mem_Din;
+  
 	process (Inst)
 	begin
 		case Inst is

@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -51,7 +52,8 @@ use IEEE.numeric_std.all;
 
 entity T51_TC01 is
 	generic(
-		FastCount	: boolean
+		FastCount	: integer := 0;
+		tristate  : integer := 1
 	);
 	port(
 		Clk			: in std_logic;
@@ -92,11 +94,23 @@ architecture rtl of T51_TC01 is
 begin
 
 	-- Registers and counter
-	Data_Out <= Cnt0(15 downto 8) when H0_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= Cnt0(7 downto 0) when L0_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= Cnt1(15 downto 8) when H1_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= Cnt1(7 downto 0) when L1_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= TMOD when M_Sel = '1' else "ZZZZZZZZ";
+	tristate_mux: if tristate/=0 generate
+  	Data_Out <= Cnt0(15 downto 8) when H0_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= Cnt0(7 downto 0) when L0_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= Cnt1(15 downto 8) when H1_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= Cnt1(7 downto 0) when L1_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= TMOD when M_Sel = '1' else "ZZZZZZZZ";
+  end generate;
+	
+	std_mux: if tristate=0 generate
+  	Data_Out <= Cnt0(15 downto 8) when H0_Sel = '1' else
+  	            Cnt0(7 downto 0) when L0_Sel = '1' else
+  	            Cnt1(15 downto 8) when H1_Sel = '1' else
+  	            Cnt1(7 downto 0) when L1_Sel = '1' else
+  	            TMOD when M_Sel = '1' else 
+  	            (others =>'-');
+	end generate;
+	
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
@@ -247,7 +261,7 @@ begin
 			else
 				Prescaler := Prescaler + 1;
 			end if;
-			if FastCount then
+			if FastCount/=0 then
 				Tick12 <= '1';
 			end if;
 		end if;

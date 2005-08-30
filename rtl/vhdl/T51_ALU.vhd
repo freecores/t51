@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0219
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -51,6 +52,9 @@ use IEEE.numeric_std.all;
 use WORK.T51_Pack.all;
 
 entity T51_ALU is
+  generic(
+		tristate  : integer := 0
+	);
 	port(
 		Clk			: in std_logic;
 		Last		: in std_logic;
@@ -134,6 +138,8 @@ architecture rtl of T51_ALU is
 	-- AddSub intermediate signals
 	signal	CJNE_CY_n	: std_logic;
 	signal	CJNE_Q		: std_logic_vector(7 downto 0);
+	signal  CJNE_Q_ZERO : std_logic;
+	signal  CJNE_CY     : std_logic;
 
 	-- MOV intermediate signals
 	signal	MOV_Op		: std_logic_vector(3 downto 0);
@@ -488,65 +494,177 @@ begin
 	end process;
 
 	-- Accumulator ALU
-
-	AOP2 <= IB when Do_A_Imm = '1' else IA;
-
-	ACC_Q <= "00000000" when Do_A_CLR = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC(0) & ACC(7 downto 1) when Do_A_RR = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= CY_In & ACC(7 downto 1) when Do_A_RRC = '1' else "ZZZZZZZZ";	-- Sets CY
-	CY_Out <= ACC(0) when Do_A_RRC = '1' else 'Z';
-	ACC_Q <= ACC(6 downto 0) & ACC(7) when Do_A_RL = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC(6 downto 0) & CY_In when Do_A_RLC = '1' else "ZZZZZZZZ";	-- Sets CY
-	CY_Out <= ACC(7) when Do_A_RLC = '1' else 'Z';
-	ACC_Q <= std_logic_vector(unsigned(ACC) + 1) when Do_A_INC = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= std_logic_vector(unsigned(ACC) - 1) when Do_A_DEC = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= not ACC when Do_A_CPL = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC or AOP2 when Do_A_ORL = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC and AOP2 when Do_A_ANL = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC xor AOP2 when Do_A_XRL = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC(3 downto 0) & ACC(7 downto 4) when Do_A_SWAP = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= IA when Do_A_XCH = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= ACC(7 downto 4) & IA(3 downto 0) when Do_A_XCHD = '1' else "ZZZZZZZZ";	-- No flags
-	ACC_Q <= AOP2 when Do_A_MOV = '1' else "ZZZZZZZZ";	-- No flags
-
-	DA : process (ACC, CY_In, AC_In)
-		variable accu : unsigned(8 downto 0);
-		variable lc : std_logic;
-	begin
-		accu := unsigned("0" & ACC);
-		if AC_In = '1' or accu(3 downto 0) > 9 then
-			accu := accu + 6;
-		end if;
-		lc := accu(8);
-		if CY_In = '1' or accu(7 downto 4) > 9 then
-			accu := accu + 96;
-		end if;
-		accu(8) := accu(8) or lc or CY_In;
-		ADA <= std_logic_vector(accu);
-	end process;
-	ACC_Q <= ADA(7 downto 0) when Do_A_DA = '1' else "ZZZZZZZZ";	-- Sets CY
-	CY_Out <= ADA(8) when Do_A_DA = '1' else 'Z';
-
 	AddSub(ACC(3 downto 0), AOP2(3 downto 0), Do_A_SUBB, Do_A_SUBB xor (Do_A_Carry and CY_In), AS_Q(3 downto 0), AS_AC);
 	AddSub(ACC(6 downto 4), AOP2(6 downto 4), Do_A_SUBB, AS_AC, AS_Q(6 downto 4), AS_Carry7);
 	AddSub(ACC(7 downto 7), AOP2(7 downto 7), Do_A_SUBB, AS_Carry7, AS_Q(7 downto 7), AS_CY);
-	OV_Out <= AS_CY xor AS_Carry7 when Do_A_ADD = '1' or Do_A_SUBB = '1' else 'Z';
-	AC_Out <= AS_AC xor Do_A_SUBB when Do_A_ADD = '1' or Do_A_SUBB = '1' else 'Z';
-	CY_Out <= AS_CY xor Do_A_SUBB when Do_A_ADD = '1' or Do_A_SUBB = '1' else 'Z';
-	ACC_Q <= AS_Q when Do_A_ADD = '1' or Do_A_SUBB = '1' else "ZZZZZZZZ";	-- Sets CY, (AC, OV)
+	
+	-- Mul / Div
+
+	md : T51_MD port map(Clk, ACC, B, Mul_Q, Mul_OV, Div_Q, Div_OV, Div_Rdy);
+	
+	AOP2 <= IB when Do_A_Imm = '1' else IA;
+
+  tristate_mux: if tristate/=0 generate
+  	ACC_Q <= "00000000" when Do_A_CLR = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC(0) & ACC(7 downto 1) when Do_A_RR = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= CY_In & ACC(7 downto 1) when Do_A_RRC = '1' else "ZZZZZZZZ";	-- Sets CY
+  	ACC_Q <= ACC(6 downto 0) & ACC(7) when Do_A_RL = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC(6 downto 0) & CY_In when Do_A_RLC = '1' else "ZZZZZZZZ";	-- Sets CY
+  	ACC_Q <= std_logic_vector(unsigned(ACC) + 1) when Do_A_INC = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= std_logic_vector(unsigned(ACC) - 1) when Do_A_DEC = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= not ACC when Do_A_CPL = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC or AOP2 when Do_A_ORL = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC and AOP2 when Do_A_ANL = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC xor AOP2 when Do_A_XRL = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC(3 downto 0) & ACC(7 downto 4) when Do_A_SWAP = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= IA when Do_A_XCH = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= ACC(7 downto 4) & IA(3 downto 0) when Do_A_XCHD = '1' else "ZZZZZZZZ";	-- No flags
+  	ACC_Q <= AOP2 when Do_A_MOV = '1' else "ZZZZZZZZ";	-- No flags	
+  	ACC_Q <= ADA(7 downto 0) when Do_A_DA = '1' else "ZZZZZZZZ";	-- Sets CY
+  	ACC_Q <= AS_Q when Do_A_ADD = '1' or Do_A_SUBB = '1' else "ZZZZZZZZ";	-- Sets CY, (AC, OV)
+    ACC_Q <= Mul_Q(7 downto 0) when Do_A_MUL = '1' else "ZZZZZZZZ";	-- Sets OV
+    ACC_Q <= Div_Q(7 downto 0) when Do_A_DIV = '1' else "ZZZZZZZZ";	-- Sets OV 
+    
+    CY_Out <= CJNE_CY when Do_I_CJNE = '1' else 'Z';
+  	CY_Out <= ADA(8) when Do_A_DA = '1' else 'Z';
+  	CY_Out <= ACC(0) when Do_A_RRC = '1' else 'Z';
+  	CY_Out <= ACC(7) when Do_A_RLC = '1' else 'Z';
+    CY_Out <= AS_CY xor Do_A_SUBB when Do_A_ADD = '1' or Do_A_SUBB = '1' else 'Z';
+    CY_Out <= '0' when Do_A_DIV = '1' or Do_A_MUL = '1' else 'Z';
+    
+    CY_Out <= not CY_In when Do_B_C_Dir = '1' and Do_B_Op = "11" else
+  			'0' when Do_B_C_Dir = '1' and Do_B_Op = "00" else
+  			'1' when Do_B_C_Dir = '1' and Do_B_Op = "01" else 'Z';
+  
+  	CY_Out <= CY_In or Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "11" and Do_B_Inv = '0' else
+  			CY_In and Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "00" and Do_B_Inv = '0' else
+  			CY_In or Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "10" and Do_B_Inv = '1' else
+  			Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "10" and Do_B_Inv = '0' else
+  			CY_In and Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "11" and Do_B_Inv = '1' else 'Z';
+    
+  	
+  	AC_Out <= AS_AC xor Do_A_SUBB when Do_A_ADD = '1' or Do_A_SUBB = '1' else 'Z';
+  	
+  	B_Q <= Mul_Q(15 downto 8) when Do_A_MUL = '1' else "ZZZZZZZZ";	-- Sets OV
+  	B_Q <= Div_Q(15 downto 8) when Do_A_DIV = '1' else "ZZZZZZZZ";	-- Sets OV
+  	
+  	OV_Out <= AS_CY xor AS_Carry7 when Do_A_ADD = '1' or Do_A_SUBB = '1' else 'Z';  
+  	OV_Out <= Div_OV when Do_A_DIV = '1' else 'Z';
+    OV_Out <= Mul_OV when Do_A_MUL = '1' else 'Z';
+  	
+  	IDCPBL_Q <= std_logic_vector(unsigned(IA) + 1) when Do_I_INC = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= std_logic_vector(unsigned(IA) - 1) when Do_I_DEC = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= IOP or IA when Do_I_ORL = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= IOP and IA when Do_I_ANL = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= IOP xor IA when Do_I_XRL = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= ACC when Do_A_XCH = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= IA(7 downto 4) & ACC(3 downto 0) when Do_A_XCHD = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= Bit_Result when Do_B_JBC = '1' or Do_B_BA_Dir = '1' or Do_B_MOV = '1' else "ZZZZZZZZ";
+  	IDCPBL_Q <= MOV_Q when Do_I_MOV = '1' else "ZZZZZZZZ";	-- No flags
+  	IDCPBL_Q <= IA_d when Do_I_MOVD = '1' else "ZZZZZZZZ";	-- No flags
+	end generate;
+	
+	std_mux: if tristate=0 generate
+	  ACC_Q <= "00000000" when Do_A_CLR = '1' else 	-- No flags
+  	         ACC(0) & ACC(7 downto 1) when Do_A_RR = '1' else 	-- No flags
+  	         CY_In & ACC(7 downto 1) when Do_A_RRC = '1' else 	-- Sets CY
+  	         ACC(6 downto 0) & ACC(7) when Do_A_RL = '1' else 	-- No flags
+  	         ACC(6 downto 0) & CY_In when Do_A_RLC = '1' else 	-- Sets CY
+  	         std_logic_vector(unsigned(ACC) + 1) when Do_A_INC = '1' else 	-- No flags
+  	         std_logic_vector(unsigned(ACC) - 1) when Do_A_DEC = '1' else 	-- No flags
+  	         not ACC when Do_A_CPL = '1' else 	-- No flags
+  	         ACC or AOP2 when Do_A_ORL = '1' else 	-- No flags
+  	         ACC and AOP2 when Do_A_ANL = '1' else 	-- No flags
+  	         ACC xor AOP2 when Do_A_XRL = '1' else 	-- No flags
+  	         ACC(3 downto 0) & ACC(7 downto 4) when Do_A_SWAP = '1' else 	-- No flags
+  	         IA when Do_A_XCH = '1' else 	-- No flags
+  	         ACC(7 downto 4) & IA(3 downto 0) when Do_A_XCHD = '1' else 	-- No flags
+  	         AOP2 when Do_A_MOV = '1' else 	-- No flags	
+  	         ADA(7 downto 0) when Do_A_DA = '1' else 	-- Sets CY
+  	         AS_Q when Do_A_ADD = '1' or Do_A_SUBB = '1' else 	-- Sets CY, (AC, OV)
+             Mul_Q(7 downto 0) when Do_A_MUL = '1' else 	-- Sets OV
+             Div_Q(7 downto 0) when Do_A_DIV = '1' else 	-- Sets OV 
+             (others =>'-');
+             
+    CY_Out <= CJNE_CY when Do_I_CJNE = '1' else 
+  	          ADA(8) when Do_A_DA = '1' else 
+  	          ACC(0) when Do_A_RRC = '1' else 
+  	          ACC(7) when Do_A_RLC = '1' else 
+              AS_CY xor Do_A_SUBB when Do_A_ADD = '1' or Do_A_SUBB = '1' else 
+              '0' when Do_A_DIV = '1' or Do_A_MUL = '1' else 
+              
+              not CY_In when Do_B_C_Dir = '1' and Do_B_Op = "11" else
+  			      '0' when Do_B_C_Dir = '1' and Do_B_Op = "00" else
+  			      '1' when Do_B_C_Dir = '1' and Do_B_Op = "01" else 
+  			      
+              CY_In or Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "11" and Do_B_Inv = '0' else
+              CY_In and Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "00" and Do_B_Inv = '0' else
+              CY_In or Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "10" and Do_B_Inv = '1' else
+              Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "10" and Do_B_Inv = '0' else
+              CY_In and Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "11" and Do_B_Inv = '1' else 
+              '-';
+              
+     AC_Out <= AS_AC xor Do_A_SUBB when Do_A_ADD = '1' or Do_A_SUBB = '1' else 
+               '-';
+     
+     B_Q <= Mul_Q(15 downto 8) when Do_A_MUL = '1' else 	-- Sets OV 
+            Div_Q(15 downto 8) when Do_A_DIV = '1' else 	-- Sets OV 
+            (others =>'-');
+            
+    OV_Out <= AS_CY xor AS_Carry7 when Do_A_ADD = '1' or Do_A_SUBB = '1' else   
+  	          Div_OV when Do_A_DIV = '1' else 
+              Mul_OV when Do_A_MUL = '1' else 
+              '-';
+              
+    IDCPBL_Q <= std_logic_vector(unsigned(IA) + 1) when Do_I_INC = '1' else 	-- No flags
+  	            std_logic_vector(unsigned(IA) - 1) when Do_I_DEC = '1' else 	-- No flags
+  	            IOP or IA when Do_I_ORL = '1' else 	-- No flags
+  	            IOP and IA when Do_I_ANL = '1' else 	-- No flags
+  	            IOP xor IA when Do_I_XRL = '1' else 	-- No flags
+  	            ACC when Do_A_XCH = '1' else 	-- No flags
+  	            IA(7 downto 4) & ACC(3 downto 0) when Do_A_XCHD = '1' else 	-- No flags
+  	            Bit_Result when Do_B_JBC = '1' or Do_B_BA_Dir = '1' or Do_B_MOV = '1' else 
+  	            MOV_Q when Do_I_MOV = '1' else 	-- No flags
+  	            IA_d when Do_I_MOVD = '1' else 	-- No flags
+  	            (others =>'-');
+              
+	end generate;
+
+  DJNZ <= '1' when std_logic_vector(unsigned(IA) - 1) /= "00000000" else '0';
+
+	-- DAA Opcode
+	DA : process (ACC, CY_In, AC_In)
+		variable accu : unsigned(8 downto 0);
+--		variable lc  : std_logic;
+		variable add : unsigned(7 downto 0);
+--		variable do_add_lsb : boolean;
+	begin
+		accu := unsigned("0" & ACC);
+		add  := (others =>'0');
+--		do_add_lsb := false;
+		if AC_In = '1' or accu(3 downto 0) > 9 then
+--			accu(3 downto 0) := accu(3 downto 0) + 6;
+      add(3 downto 0) := "0110";  --6
+--      do_add_lsb := true;
+		end if;
+--		lc := accu(8);
+		if CY_In = '1' or accu(7 downto 4) > 9 or
+		   (accu(7 downto 4) = 9 and accu(3 downto 0) > 9) then
+--			accu := accu + 96;
+      add(7 downto 4) := "0110";  --6
+		end if;
+		accu := accu + add;
+--		accu(8) := accu(8) or lc or CY_In;
+		ADA <= std_logic_vector(accu);
+		ADA(8) <= accu(8) or CY_In;  -- calculate Carry Out
+	end process;
+	
+
+
 
 	-- Auxiliary ALU
 
 	IOP <= IB when Do_I_Imm = '1' else ACC;
-
-	IDCPBL_Q <= std_logic_vector(unsigned(IA) + 1) when Do_I_INC = '1' else "ZZZZZZZZ";	-- No flags
-	IDCPBL_Q <= std_logic_vector(unsigned(IA) - 1) when Do_I_DEC = '1' else "ZZZZZZZZ";	-- No flags
-	DJNZ <= '1' when std_logic_vector(unsigned(IA) - 1) /= "00000000" else '0';
-	IDCPBL_Q <= IOP or IA when Do_I_ORL = '1' else "ZZZZZZZZ";	-- No flags
-	IDCPBL_Q <= IOP and IA when Do_I_ANL = '1' else "ZZZZZZZZ";	-- No flags
-	IDCPBL_Q <= IOP xor IA when Do_I_XRL = '1' else "ZZZZZZZZ";	-- No flags
-	IDCPBL_Q <= ACC when Do_A_XCH = '1' else "ZZZZZZZZ";	-- No flags
-	IDCPBL_Q <= IA(7 downto 4) & ACC(3 downto 0) when Do_A_XCHD = '1' else "ZZZZZZZZ";	-- No flags
 
 	MOV : process (MOV_Op, IB, ACC, IA_d)
 	begin
@@ -580,12 +698,18 @@ begin
 			MOV_Q <= "--------";
 		end case;
 	end process;
-	IDCPBL_Q <= MOV_Q when Do_I_MOV = '1' else "ZZZZZZZZ";	-- No flags
-	IDCPBL_Q <= IA_d when Do_I_MOVD = '1' else "ZZZZZZZZ";	-- No flags
+
 
 	AddSub(IA, IB, '1', '1', CJNE_Q, CJNE_CY_n);
-	CY_Out <= not CJNE_CY_n when Do_I_CJNE = '1' else 'Z';
-	CJNE <= '1' when Do_I_CJNE = '1' and CJNE_Q /= "00000000" else
+	CJNE_CY <= not CJNE_CY_n;
+--	CY_Out <= not CJNE_CY_n when Do_I_CJNE = '1' else 'Z';
+	
+	
+	CJNE_Q_ZERO <= '1' when CJNE_Q = "00000000" else
+	               '0';
+	
+--	CJNE <= '1' when Do_I_CJNE = '1' and CJNE_Q /= "00000000" else
+	CJNE <= '1' when Do_I_CJNE = '1' and CJNE_Q_ZERO='0' else
 			'0' when Do_I_CJNE = '1' else
 			'1' when AS_Q /= "00000000" else '0';	-- Sets CY
 
@@ -595,36 +719,14 @@ begin
 	Bit_Op2 <= Bit_Pattern and not IA when Do_B_Inv = '1' else Bit_Pattern and IA;
 	Bit_IsOne <= '0' when Bit_Op2 = "00000000" else '1';
 
-	CY_Out <= not CY_In when Do_B_C_Dir = '1' and Do_B_Op = "11" else
-			'0' when Do_B_C_Dir = '1' and Do_B_Op = "00" else
-			'1' when Do_B_C_Dir = '1' and Do_B_Op = "01" else 'Z';
 
-	CY_Out <= CY_In or Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "11" and Do_B_Inv = '0' else
-			CY_In and Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "00" and Do_B_Inv = '0' else
-			CY_In or Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "10" and Do_B_Inv = '1' else
-			Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "10" and Do_B_Inv = '0' else
-			CY_In and Bit_IsOne when Do_B_C_BA = '1' and Do_B_Op = "11" and Do_B_Inv = '1' else 'Z';
 
 	Bit_Result <= IA xor Bit_Pattern when Do_B_BA_Dir = '1' and Do_B_Op = "11" else
 				Bit_Op1 when (Do_B_BA_Dir = '1' and Do_B_Op = "00") or Do_B_JBC = '1' else
 				IA or Bit_Pattern when Do_B_BA_Dir = '1' and Do_B_Op = "01" else
 				Bit_Op1 or (Bit_Pattern and CY_In & CY_In & CY_In & CY_In & CY_In & CY_In & CY_In & CY_In) when Do_B_MOV = '1' else "--------";
 
-	IDCPBL_Q <= Bit_Result when Do_B_JBC = '1' or Do_B_BA_Dir = '1' or Do_B_MOV = '1' else "ZZZZZZZZ";
 
-	-- Mul / Div
-
-	md : T51_MD port map(Clk, ACC, B, Mul_Q, Mul_OV, Div_Q, Div_OV, Div_Rdy);
-
-	ACC_Q <= Mul_Q(7 downto 0) when Do_A_MUL = '1' else "ZZZZZZZZ";	-- Sets OV
-	B_Q <= Mul_Q(15 downto 8) when Do_A_MUL = '1' else "ZZZZZZZZ";	-- Sets OV
-	OV_Out <= Mul_OV when Do_A_MUL = '1' else 'Z';
-
-	ACC_Q <= Div_Q(7 downto 0) when Do_A_DIV = '1' else "ZZZZZZZZ";	-- Sets OV
-	B_Q <= Div_Q(15 downto 8) when Do_A_DIV = '1' else "ZZZZZZZZ";	-- Sets OV
-	OV_Out <= Div_OV when Do_A_DIV = '1' else 'Z';
-
-	CY_Out <= '0' when Do_A_DIV = '1' or Do_A_MUL = '1' else 'Z';
 
 	-- Flags
 

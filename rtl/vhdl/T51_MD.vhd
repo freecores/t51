@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --

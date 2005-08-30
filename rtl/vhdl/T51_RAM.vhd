@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0219
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -52,7 +53,7 @@ use IEEE.numeric_std.all;
 
 entity T51_RAM is
 	generic(
-		RAMAddressWidth : integer
+		RAMAddressWidth : integer := 8
 	);
 	port (
 		Clk			: in std_logic;
@@ -97,6 +98,8 @@ begin
 					Mem_A <= IRAMA(to_integer(unsigned(Int_AddrA)));
 				end if;
 -- pragma translate_off
+      else
+        Mem_A <= (others =>'-');
 			end if;
 			if not is_x(Int_AddrB) then
 -- pragma translate_on
@@ -104,6 +107,8 @@ begin
 					Mem_B <= IRAMB(to_integer(unsigned(Int_AddrB)));
 				end if;
 -- pragma translate_off
+      else
+        Mem_B <= (others =>'-');
 			end if;
 -- pragma translate_on
 			if Wr = '1' then

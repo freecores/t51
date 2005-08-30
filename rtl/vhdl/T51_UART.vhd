@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -51,7 +52,8 @@ use IEEE.numeric_std.all;
 
 entity T51_UART is
 	generic(
-		FastCount	: boolean
+		FastCount	: integer := 0;
+		tristate  : integer := 1
 	);
 	port(
 		Clk			: in std_logic;
@@ -106,8 +108,17 @@ architecture rtl of T51_UART is
 begin
 
 	-- Registers
-	Data_Out <= SCON when SC_Sel = '1' else "ZZZZZZZZ";
-	Data_Out <= SBUF when SB_Sel = '1' else "ZZZZZZZZ";
+	tristate_mux: if tristate/=0 generate
+  	Data_Out <= SCON when SC_Sel = '1' else "ZZZZZZZZ";
+  	Data_Out <= SBUF when SB_Sel = '1' else "ZZZZZZZZ";
+  end generate;
+	
+	std_mux: if tristate=0 generate
+  	Data_Out <= SCON when SC_Sel = '1' else 
+  	            SBUF when SB_Sel = '1' else 
+  	            (others =>'-');	
+	end generate;
+	
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
@@ -119,8 +130,10 @@ begin
 		end if;
 	end process;
 
-	Baud16T_i <= (UseT2 and BaudC2) or (not UseT2 and BaudC1 and BaudC1_g) when SCON(6) = '1' else BaudFix;
-	Baud16R_i <= (UseR2 and BaudC2) or (not UseR2 and BaudC1 and BaudC1_g) when SCON(6) = '1' else BaudFix;
+	Baud16T_i <= (UseT2 and BaudC2) or (not UseT2 and BaudC1 and BaudC1_g) when SCON(6) = '1' else 
+	             BaudFix;
+	Baud16R_i <= (UseR2 and BaudC2) or (not UseR2 and BaudC1 and BaudC1_g) when SCON(6) = '1' else 
+	             BaudFix;
 
 	-- Baud x 16 clock generator
 	process (Clk, Rst_n)
@@ -132,9 +145,10 @@ begin
 			BaudC1_g <= '0';
 		elsif Clk'event and Clk='1' then
 			BaudFix <= '0';
-			BaudC1_g <= '1';
 			if SMOD = '0' and BaudC1 = '1' then
 				BaudC1_g <= not BaudC1_g;
+		  elsif SMOD = '1' then
+		    BaudC1_g <= '1';
 			end if;
 			if Baud_Cnt(4 downto 0) = "11111" and (SMOD = '1' or Baud_Cnt(5) = '1') then
 				BaudFix <= '1';
@@ -348,7 +362,7 @@ begin
 			else
 				Prescaler := Prescaler + 1;
 			end if;
-			if FastCount then
+			if FastCount/=0 then
 				Tick6 <= '1';
 			end if;
 		end if;

@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0222
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -65,6 +66,9 @@ package T51_Pack is
 	end component;
 
 	component T51_ALU
+	generic(
+		tristate  : integer := 0
+	);
 	port(
 		Clk			: in std_logic;
 		Last		: in std_logic;
@@ -108,35 +112,62 @@ package T51_Pack is
 		Mem_B		: out std_logic_vector(7 downto 0)
 	);
 	end component;
+	
+  component T51_RAM_Altera
+	generic(
+		RAMAddressWidth : integer
+	);
+	port (
+		Clk			: in std_logic;
+		ARE			: in std_logic;
+		Rst_n		: in std_logic;
+		Wr			: in std_logic;
+		DIn			: in std_logic_vector(7 downto 0);
+		Int_AddrA	: in std_logic_vector(7 downto 0);
+		Int_AddrA_r	: out std_logic_vector(7 downto 0);
+		Int_AddrB	: in std_logic_vector(7 downto 0);
+		Mem_A		: out std_logic_vector(7 downto 0);
+		Mem_B		: out std_logic_vector(7 downto 0)
+	);
+	end component;
 
 	component T51
 	generic(
-		DualBus : boolean := false;
-		RAMAddressWidth : integer := 8
+		DualBus         : integer := 1;
+		RAMAddressWidth : integer := 8;
+		SecondDPTR      : integer := 1;
+		tristate        : integer := 1;
+		fast_cpu        : integer := 0
 	);
 	port(
-		Clk			: in std_logic;
-		Rst_n		: in std_logic;
-		Ready		: in std_logic;
-		ROM_Addr	: out std_logic_vector(15 downto 0);
-		ROM_Data	: in std_logic_vector(7 downto 0);
-		RAM_Addr	: out std_logic_vector(15 downto 0);
-		RAM_RData	: in std_logic_vector(7 downto 0);
-		RAM_WData	: out std_logic_vector(7 downto 0);
-		RAM_Cycle	: out std_logic;
-		RAM_Rd		: out std_logic;
-		RAM_Wr		: out std_logic;
-		Int_Trig	: in std_logic_vector(6 downto 0);
-		Int_Acc		: out std_logic_vector(6 downto 0);
-		SFR_Rd_RMW	: out std_logic;
-		SFR_Wr		: out std_logic;
-		SFR_Addr	: out std_logic_vector(6 downto 0);
-		SFR_WData	: out std_logic_vector(7 downto 0);
-		SFR_RData	: inout std_logic_vector(7 downto 0)
+		Clk			     : in std_logic;
+		Rst_n		     : in std_logic;
+		Ready		     : in std_logic;
+		ROM_Addr	   : out std_logic_vector(15 downto 0);
+		ROM_Data	   : in std_logic_vector(7 downto 0);
+		RAM_Addr	   : out std_logic_vector(15 downto 0);
+		RAM_RData	   : in std_logic_vector(7 downto 0);
+		RAM_WData	   : out std_logic_vector(7 downto 0);
+		RAM_Cycle	   : out std_logic;
+		RAM_Rd		   : out std_logic;
+		RAM_Wr		   : out std_logic;
+		Int_Trig	   : in std_logic_vector(6 downto 0);
+		Int_Acc		   : out std_logic_vector(6 downto 0);
+		SFR_Rd_RMW	 : out std_logic;
+		SFR_Wr		   : out std_logic;
+		SFR_Addr	   : out std_logic_vector(6 downto 0);
+		SFR_WData	   : out std_logic_vector(7 downto 0);
+		SFR_RData_in : in  std_logic_vector(7 downto 0);
+		IRAM_Wr      : out std_logic;
+		IRAM_Addr	   : out std_logic_vector(7 downto 0);
+		IRAM_WData   : out std_logic_vector(7 downto 0)
 	);
 	end component;
 
 	component T51_Glue
+	generic(
+		tristate  : integer := 1
+	);
 	port(
 		Clk			: in std_logic;
 		Rst_n		: in std_logic;
@@ -152,7 +183,8 @@ package T51_Pack is
 		IO_Addr_r	: in std_logic_vector(6 downto 0);
 		IO_WData	: in std_logic_vector(7 downto 0);
 		IO_RData	: out std_logic_vector(7 downto 0);
-		Int_Acc		: in std_logic_vector(6 downto 0);
+		Selected  : out std_logic;
+		Int_Acc		: in std_logic_vector(6 downto 0);    -- Acknowledge
 		R0			: out std_logic;
 		R1			: out std_logic;
 		SMOD		: out std_logic;
@@ -188,26 +220,38 @@ package T51_Pack is
 		TH2_Wr		: out std_logic;
 		SCON_Wr		: out std_logic;
 		SBUF_Wr		: out std_logic;
-		Int_Trig	: out std_logic_vector(6 downto 0)
+		Int_Trig	: out std_logic_vector(6 downto 0);
+		-- SevenSeg Controller
+		SevSeg_Con_Sel   : out std_logic;
+		SevSeg_Con_Wr    : out std_logic;
+		SevSeg_DataL_Sel : out std_logic;
+		SevSeg_DataL_Wr  : out std_logic;
+		SevSeg_DataH_Sel : out std_logic;
+		SevSeg_DataH_Wr  : out std_logic
 	);
 	end component;
 
 	component T51_Port
+	generic(
+		tristate  : integer := 1
+	);
 	port(
-		Clk			: in std_logic;
-		Rst_n		: in std_logic;
-		Sel			: std_logic;
+		Clk			  : in std_logic;
+		Rst_n		  : in std_logic;
+		Sel			  : in std_logic;
 		Rd_RMW		: in std_logic;
-		Wr			: in std_logic;
+		Wr			  : in std_logic;
 		Data_In		: in std_logic_vector(7 downto 0);
 		Data_Out	: out std_logic_vector(7 downto 0);
-		IOPort		: inout std_logic_vector(7 downto 0)
+		IOPort_in : in std_logic_vector(7 downto 0);
+		IOPort_out : out std_logic_vector(7 downto 0)
 	);
 	end component;
 
 	component T51_TC01
 	generic(
-		FastCount	: boolean
+		FastCount	: integer := 0;
+		tristate  : integer := 1
 	);
 	port(
 		Clk			: in std_logic;
@@ -237,7 +281,8 @@ package T51_Pack is
 
 	component T51_TC2
 	generic(
-		FastCount	: boolean
+		FastCount	: integer := 0;
+		tristate  : integer := 1
 	);
 	port(
 		Clk			: in std_logic;
@@ -265,7 +310,8 @@ package T51_Pack is
 
 	component T51_UART
 	generic(
-		FastCount	: boolean
+		FastCount	: integer := 0;
+		tristate  : integer := 1
 	);
 	port(
 		Clk			: in std_logic;

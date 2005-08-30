@@ -1,9 +1,10 @@
 --
 -- 8051 compatible microcontroller core
 --
--- Version : 0218
+-- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
 --
 -- All rights reserved
 --
@@ -48,50 +49,77 @@
 
 library IEEE;
 use IEEE.std_logic_1164.all;
+--library unisim;
+--use unisim.all;
 
 entity T51_Port is
+	generic(
+		tristate  : integer := 1
+	);
 	port(
-		Clk			: in std_logic;
-		Rst_n		: in std_logic;
-		Sel			: in std_logic;
+		Clk			  : in std_logic;
+		Rst_n		  : in std_logic;
+		Sel			  : in std_logic;
 		Rd_RMW		: in std_logic;
-		Wr			: in std_logic;
+		Wr			  : in std_logic;
 		Data_In		: in std_logic_vector(7 downto 0);
 		Data_Out	: out std_logic_vector(7 downto 0);
-		IOPort		: inout std_logic_vector(7 downto 0)
+		IOPort_in : in std_logic_vector(7 downto 0);
+		IOPort_out : out std_logic_vector(7 downto 0)
 	);
 end T51_Port;
 
 architecture rtl of T51_Port is
-
+--  component InputSync
+--    port (
+--      Input : in  std_ulogic;
+--      clk   : in  std_ulogic;
+--      clr_n : in  std_ulogic;
+--      q     : out std_ulogic);
+--  end component;
+--  component PULLUP
+--    port (
+--      O : out std_logic
+--      );
+--  end component;
+  
 	signal Port_Output	: std_logic_vector(7 downto 0);
 	signal Port_Input	: std_logic_vector(7 downto 0);
+--	signal P_trans  	: std_logic_vector(7 downto 0);
 
 begin
 
-	IOPort(0) <= '0' when Port_Output(0) = '0' else 'Z';
-	IOPort(1) <= '0' when Port_Output(1) = '0' else 'Z';
-	IOPort(2) <= '0' when Port_Output(2) = '0' else 'Z';
-	IOPort(3) <= '0' when Port_Output(3) = '0' else 'Z';
-	IOPort(4) <= '0' when Port_Output(4) = '0' else 'Z';
-	IOPort(5) <= '0' when Port_Output(5) = '0' else 'Z';
-	IOPort(6) <= '0' when Port_Output(6) = '0' else 'Z';
-	IOPort(7) <= '0' when Port_Output(7) = '0' else 'Z';
-
-	Data_Out <= Port_Input when Sel = '1' and Rd_RMW = '0' else "ZZZZZZZZ";
-	Data_Out <= Port_Output when Sel = '1' and Rd_RMW = '1' else "ZZZZZZZZ";
-
-	process (Clk)
-	begin
-		if Clk'event and Clk = '1' then
-			Port_Input <= IOPort;
-		end if;
-	end process;
+	tristate_mux: if tristate/=0 generate
+  	Data_Out <= Port_Input when Sel = '1' and Rd_RMW = '0' else (others =>'Z');
+  	Data_Out <= Port_Output when Sel = '1' and Rd_RMW = '1' else (others =>'Z');
+  end generate;
+	
+	std_mux: if tristate=0 generate
+  	Data_Out <= Port_Input when Sel = '1' and Rd_RMW = '0' else 
+  	            Port_Output when Sel = '1' and Rd_RMW = '1' else 
+  	            (others =>'-');
+  end generate;
+  
+iop: for i in 0 to 7 generate
+--  IOPort(i) <= '0' when Port_Output(i) = '0' else 'Z';
+--  P_PULLUP: PULLUP port map(O =>IOPort(i));
+--  IOPort(i) <= 'H';
+  IOPort_out(i) <= Port_Output(i);
+  Port_Input(i)<=To_X01Z(IOPort_in(i));
+  
+  
+--  ISP : InputSync
+--      port map (
+--        Input => P_trans(i),
+--        clk   => clk,
+--        clr_n => Rst_n,
+--        q     => Port_Input(i));
+end generate;
 
 	process (Rst_n, Clk)
 	begin
 		if Rst_n = '0' then
-			Port_Output <= "11111111";
+			Port_Output <= (others =>'1');
 		elsif Clk'event and Clk = '1' then
 			if Wr = '1' then
 				Port_Output <= Data_In;
