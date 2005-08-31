@@ -31,6 +31,7 @@ architecture behaviour of TestBench32 is
 	signal P1			: std_logic_vector(7 downto 0);
 	signal P2			: std_logic_vector(7 downto 0);
 	signal P3			: std_logic_vector(7 downto 0);
+	signal p3_out	: std_logic_vector(7 downto 0);
 
 begin
 
@@ -46,10 +47,14 @@ begin
 			ADR_O => ADR_O,
 			DAT_I => DAT_I,
 			DAT_O => DAT_O,
-			P0 => P0,
-			P1 => P1,
-			P2 => P2,
-			P3 => P3,
+			P0_in => P0,
+			P1_in => P1,
+			P2_in => P2,
+			P3_in => P3,
+			P0_out => P0,
+      P1_out => P1,
+      P2_out => P2,
+      P3_out => P3_out,
 			INT0 => INT0,
 			INT1 => '1',
 			T0 => '1',
@@ -85,7 +90,8 @@ begin
 	ACK_I <= '1' when ADR_O_r = ADR_O else '0';
 
 	P3(0) <= RXD;
-
+  P3(7 downto 1) <= P3_out(7 downto 1);
+  
 	process (CLK_I)
 	begin
 		if CLK_I'event and CLK_I = '1' then
@@ -94,11 +100,12 @@ begin
 	end process;
 
 	as : AsyncStim
-		generic map(FileName => "BASIC.txt", InterCharDelay => 5000 us, Baud => 115200, Bits => 8)
+		generic map(FileName => "BASIC.txt", InterCharDelay => 5000 us, Baud => 57600, Bits => 8)
 		port map(RXD);
 
+
 	al : AsyncLog
-		generic map(FileName => "RX_Log.txt", Baud => 115200, Bits => 8)
+		generic map(FileName => "RX_Log.txt", Baud => 57600, Bits => 8)
 		port map(TXD);
 
 	CLK_I <= not CLK_I after 45 ns;

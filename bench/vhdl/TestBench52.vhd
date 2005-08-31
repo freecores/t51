@@ -18,6 +18,7 @@ architecture behaviour of TestBench52 is
 	signal P1			: std_logic_vector(7 downto 0);
 	signal P2			: std_logic_vector(7 downto 0);
 	signal P3			: std_logic_vector(7 downto 0);
+	signal p3_out	: std_logic_vector(7 downto 0);
 	signal ExSel		: std_logic;
 	signal ExRd			: std_logic;
 	signal ExWr			: std_logic;
@@ -31,10 +32,14 @@ begin
 		port map(
 			Clk => Clk,
 			Rst_n => Rst_n,
-			P0 => P0,
-			P1 => P1,
-			P2 => P2,
-			P3 => P3,
+			P0_in => P0,
+			P1_in => P1,
+			P2_in => P2,
+			P3_in => P3,
+			P0_out => P0,
+      P1_out => P1,
+      P2_out => P2,
+      P3_out => P3_out,
 			INT0 => INT0,
 			INT1 => '1',
 			T0 => '1',
@@ -53,12 +58,13 @@ begin
 			ExDO => ExDO);
 
 	P3(0) <= RXD;
+	P3(7 downto 1) <= P3_out(7 downto 1);
 	ExDI <= (others => '1');
 
-	as : AsyncStim generic map(FileName => "BASIC.txt", InterCharDelay => 5000 us, Baud => 115200, Bits => 8)
+	as : AsyncStim generic map(FileName => "BASIC.txt", InterCharDelay => 5000 us, Baud => 57600, Bits => 8)
 				port map(RXD);
 
-	al : AsyncLog generic map(FileName => "RX_Log.txt", Baud => 115200, Bits => 8)
+	al : AsyncLog generic map(FileName => "RX_Log.txt", Baud => 57600, Bits => 8)
 				port map(TXD);
 
 	Clk <= not Clk after 45 ns;
