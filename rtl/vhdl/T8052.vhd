@@ -206,7 +206,7 @@ begin
 		end if;
 	end process;
 
-  XRAM_Addr <= RAM_Addr_r when RAM_Wr='1' else RAM_Addr;
+  XRAM_Addr <= RAM_Addr_r;
 
   ExAddr <= XRAM_Addr;
 

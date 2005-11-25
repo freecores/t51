@@ -57,7 +57,8 @@ entity T51 is
 		RAMAddressWidth : integer := 8;
 		SecondDPTR      : integer := 0;
 		tristate        : integer := 1;
-		fast_cpu        : integer := 0
+		fast_cpu        : integer := 0;
+		simenv          : integer := 0
 	);
 	port(
 		Clk			     : in std_logic;
@@ -137,6 +138,7 @@ architecture rtl of T51 is
 	signal	PSW_Stall		: std_logic;
 	signal  ACC_Stall   : std_logic;
 	signal  SP_Stall    : std_logic;
+	signal  movx_Stall  : std_logic;
 	signal  iReady      : std_logic;
 
 	signal	Next_PSW7		: std_logic;
@@ -173,6 +175,7 @@ architecture rtl of T51 is
 	signal	Inst_Skip		: std_logic;
 	signal	Div_Rdy			: std_logic;
 	signal	RAM_Rd_i		: std_logic;
+	signal	RAM_Wr_i		: std_logic;
 	signal	INC_DPTR		: std_logic;
 	signal	CJNE			: std_logic;
 	signal	DJNZ			: std_logic;
@@ -189,10 +192,13 @@ architecture rtl of T51 is
   signal rd_flag_r        : std_ulogic;
   signal rd_sfr_flag      : std_logic;
   signal Do_ACC_Wr        : std_logic;
+  
+  signal ramc,ramc_r,ramrw_r : std_logic;
 begin
 
   iReady <= Ready and not xxx_flag;
-
+  ram_cycle <= ramc;
+  
 	Last <= '1' when ICall = '1' and FCycle = "11" else
 			'0' when ICall = '1' else
 			'1' when MCode(1 downto 0) = FCycle and iReady = '1' else 
@@ -456,8 +462,19 @@ begin
 				           ROM_Data(4 downto 0) = "10001" or 
 				           IStart = '1') else -- LCALL, ACALL, Int
 				     '0';
+
+  -- to subsequent movx instructions
+--  movx_Stall <= '0';
+  movx_Stall <= '1' when Last = '1' and 
+                        -- movx opcode at current instruction
+                        Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and 
+	                      Inst(1 downto 0) /= "01" and
+	                      -- movx opcode at next instruction
+	                      ROM_Data(7 downto 5) = "111" and ROM_Data(3 downto 2) = "00" and 
+	                      ROM_Data(1 downto 0) /= "01" else
+	               '0';
 		                
-	Stall_pipe <= Ri_Stall or PSW_Stall or ACC_Stall or SP_Stall;
+	Stall_pipe <= Ri_Stall or PSW_Stall or ACC_Stall or SP_Stall or movx_Stall;
 				
 	process (Rst_n, Clk)
 	  variable bitnr_v : natural range 0 to 7;
@@ -477,7 +494,7 @@ begin
 --			      Ri_Stall = '1' or PSW_Stall = '1' or ACC_Stall = '1' then
 				-- Skip/Stall/Flush: NOP insertion
 				Inst <= (others => '0');
-			elsif Inst = "10000100" and PCPause = '1' then
+			elsif Inst = "10000100" and PCPause = '1' then  -- DIV
 			else
 				if Last = '1' then
 					Inst <= ROM_Data;
@@ -706,14 +723,18 @@ begin
 		end if;
 	end process;
 	
-	
+	--if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
 	-- MOVX Instruction
-	RAM_Cycle <= '1' when Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and 
+	ramc <= '1' when Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and 
 	                      Inst(1 downto 0) /= "01" and 
 	                      PCPaused(0) = '0' else 
-	             '0';
+	        '0';
 	             
-	RAM_Rd <= RAM_Rd_i;
+--	RAM_Rd <= RAM_Rd_i and ramc and not ramrw_r when DualBus=0 else
+--	          RAM_Rd_i and ramc;
+  RAM_Rd <= RAM_Rd_i and ramc;
+
+	RAM_Wr <= RAM_Wr_i;
 	
 	Do_ACC_Wr <= '1' when (ACC_Wr or RAM_Rd_i)='1' or
 	                      (SFR_Wr_i = '1' and Int_AddrA_r = "11100000") else
@@ -730,16 +751,26 @@ begin
 --  	            '0';
   fast: if fast_cpu/=0 generate
   	xxx_flag <= '1' when ((SFR_Wr_i and rd_flag)= '1' and Int_AddrA_r=Int_AddrA) or
-  	                      ((Do_ACC_Wr and rd_flag)='1' and Int_AddrA = "11010000") or  -- WR to ACC in Progress and read from 
+  	                      ((Do_ACC_Wr and rd_flag)='1' and Int_AddrA = "11010000") or  -- WR to ACC in Progress and read from PSW
   	                      ((B_Wr and rd_flag)= '1' and Int_AddrA = "11110000") or
-  	                      (Status_Wr/="000" and rd_flag='1' and Int_AddrA="11010000") else
+  	                      (Status_Wr/="000" and rd_flag='1' and Int_AddrA="11010000") or
+--  	                      (ramc='1' and ramc_r='0')
+                          (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and ramc_r='0') --MOVX A,??
+--                          (((RAM_Rd_i and ramc)='1' or RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
+  	                      else
   	            '0';
 	end generate;
 	slow: if fast_cpu=0 generate
 	  -- Inserts an Waitstate on every mov @Ri,direct or mov Ri,data Instruction
-  	xxx_flag <= '1' when (rd_flag and not rd_flag_r)= '1' or 
-  	                     ((rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000") else
+  	xxx_flag <= '1' when (rd_flag and not rd_flag_r) = '1' or                                        -- mov @ri,direct or mov ri,direct
+  	                     ((rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000")  or         -- Wr to PSW and @Ri Adressing at next instruction
+--  	                     (ramc='1' and ramc_r='0')
+                         (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and ramc_r='0') or  --MOVX A,??
+--                         (((RAM_Rd_i and ramc)='1' or RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
+                         ((RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
+  	                     else
   	            '0';
+  	            
     process(Rst_n, Clk)
     begin
       if Rst_n = '0' then
@@ -760,13 +791,19 @@ begin
 			DPH0 <= "00000000";
 			INC_DPTR <= '0';
 			RAM_Rd_i <= '0';
-			RAM_Wr <= '0';
+			RAM_Wr_i <= '0';
 			if SecondDPTR/=0 then
 			  DPL1   <= "00000000";
 			  DPH1   <= "00000000";
 			  DPS_r  <= '0';
 			end if;
+			ramc_r <= '0';
+			ramrw_r <= '0';
 		elsif Clk'event and Clk = '1' then
+		  if Ready='1' then
+		    ramc_r  <= ramc;
+		    ramrw_r <= (RAM_Rd_i and ramc) or RAM_Wr_i;
+		  end if;
 			if SFR_Wr_i = '1' and Int_AddrA_r = "10100000" then
 				P2R <= Res_Bus;
 			end if;
@@ -823,16 +860,18 @@ begin
 					INC_DPTR <= '1';
 				end if;
 			end if;
-			RAM_Wr <= '0';
-			-- movx instruction
-			if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and DualBus/=0) or
-				(Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and iReady = '0' and DualBus=0) then
-				RAM_Wr <= '1';
-			end if;
-			RAM_Rd_i <= '0';
---			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and iReady = '1' then
-      if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
-				RAM_Rd_i <= '1';
+			if Ready='1' then
+  			RAM_Wr_i <= '0';
+  			-- movx instruction
+  			if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01") then -- and DualBus/=0) or
+  --				(Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and iReady = '0' and DualBus=0) then
+  				RAM_Wr_i <= '1';
+  			end if;
+  			RAM_Rd_i <= '0';
+  --			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and iReady = '1' then
+        if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" then
+  				RAM_Rd_i <= '1';
+  			end if;
 			end if;
 		end if;
 	end process;
@@ -949,7 +988,7 @@ begin
 
 	process (ACC, Bit_Pattern, CJNE, DJNZ, DPH, DPL, Div_Rdy, FCycle, ICall,
              Inst, Inst1, Inst2, Int_Trig_r, Mem_A, Mem_B, Next_ACC_Z, Next_PSW7, OPC,
-             Op_A, PC, PCPaused, RET_r, ROM_Data, iReady, Rst_r_n, Stall_pipe)
+             Op_A, PC, PCPaused, RET_r, ROM_Data, iReady, Rst_r_n, Stall_pipe,RAM_Rd_i,RAM_Wr_i,ramc)
 	begin
 		NPC <= PC;
 		J_Skip <= '0';
@@ -957,7 +996,9 @@ begin
 		PCPause <= '0';
 		-- push,pop
 		if (Inst(7 downto 5) = "110" and Inst(3 downto 0) = "0000" and FCycle = "01" and PCPaused(0) = '0') or -- PUSH, POP
-			(Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or -- Single bus MOVX
+--       (((RAM_Rd_i and ramc)='1' or RAM_Wr_i='1') and DualBus=0) or
+--			(Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or -- Single bus MOVX
+      (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or 
 			(Inst = "10000100" and (PCPaused(3 downto 1) = "000" or Div_Rdy = '0')) then -- DIV
 			PCPause <= '1';
 		else
@@ -967,7 +1008,8 @@ begin
 			end if;
 		end if;
 		-- Single bus MOVX
-		if Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 then
+--		if Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 then
+    if (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01"  and DualBus=0) then
 			J_Skip <= '1';
 		end if;
 		-- Return
