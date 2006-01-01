@@ -45,6 +45,7 @@
 --
 -- File history :
 --
+-- 16-Dec-05 : Bugfix for JBC Instruction
 
 library IEEE;
 use IEEE.std_logic_1164.all;
@@ -399,7 +400,12 @@ begin
 				if Int_AddrA(7) = '1' and (Inst(7 downto 4) = "1000" or Inst(3 downto 1) /= "011") and
 				   Inst /= "11000000"  then
 					-- Direct addressing
-					SFR_Wr_i <= '1';
+					if(Inst = "00010000") then -- JBC, write result only back if jump is taken
+					  SFR_Wr_i <= J_Skip;
+					else
+					  -- Direct addressing
+					  SFR_Wr_i <= '1';
+          end if;
 				else
 					Mem_Wr <= '1';
 				end if;
