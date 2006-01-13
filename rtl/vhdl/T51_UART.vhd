@@ -194,8 +194,9 @@ begin
 			if SC_Wr = '1' then
 				SCON(0) <= Data_In(0);
 				SCON(2) <= Data_In(2);
+				RX_Shifting <= '0';
 			end if;
-			if SCON(7 downto 6) = "00" and Tick6 = '1' then
+			if SCON(7 downto 6) = "00" and Tick6 = '1' and (TXD_i = '0' or RX_Bit_Cnt = 0) then
 				if SCON(4) = '1' and SCON(0) = '0' and RX_Bit_Cnt = 0 then
 					RX_Shifting <= '1';
 					RX_Bit_Cnt <= 1;
@@ -286,6 +287,7 @@ begin
 		elsif Clk'event and Clk = '1' then
 			if SC_Wr = '1' then
 				SCON(1) <= Data_In(1);
+				TX_Shifting <= '0';
 			end if;
 			if SB_Wr = '1' then
 				TX_Data <= Data_In;
@@ -309,7 +311,7 @@ begin
 						TX_Bit_Cnt <= 0;
 					else
 						RXD_O <= TX_ShiftReg(0);
-						SCON(1) <= '1';
+--						SCON(1) <= '1';
 						TX_Bit_Cnt <= TX_Bit_Cnt + 1;
 					end if;
 					TX_ShiftReg(7 downto 0) <= TX_ShiftReg(8 downto 1);
