@@ -559,8 +559,8 @@ begin
   	SFR_RData <= DPH1 when SecondDPTR/=0 and INC_DPTR='0' and Int_AddrA = "10000101" else "ZZZZZZZZ";
   	SFR_RData <= "0000000"&DPS when SecondDPTR/=0 and Int_AddrA = "10000110" else "ZZZZZZZZ";
   	
-  	SFR_RData <= DPL0 when Int_AddrA = "10000010" else "ZZZZZZZZ";
-  	SFR_RData <= DPH0 when Int_AddrA = "10000011" else "ZZZZZZZZ";
+  	SFR_RData <= DPL0 when INC_DPTR='0' and Int_AddrA = "10000010" else "ZZZZZZZZ";
+  	SFR_RData <= DPH0 when INC_DPTR='0' and Int_AddrA = "10000011" else "ZZZZZZZZ";
   	SFR_RData <= IP when Int_AddrA = "10111000" else "ZZZZZZZZ";
   	SFR_RData <= SFR_RData_in;
   end generate;
