@@ -574,14 +574,13 @@ begin
   	             dptr_inc(7 downto 0) when (SecondDPTR/=0 and (INC_DPTR and next_DPS) = '1' and Int_AddrA = "10000100") or
   	                                       ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000010") else 
                  dptr_inc(15 downto 8) when (SecondDPTR/=0 and (INC_DPTR and next_DPS) = '1' and Int_AddrA = "10000101") or
-  	                                        ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000011") else
-  	             
-                 DPL1 when SecondDPTR/=0 and Int_AddrA = "10000100" else 
-  	             DPH1 when SecondDPTR/=0 and Int_AddrA = "10000101" else 
+  	                                        ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000011") else 
+                 DPL1 when SecondDPTR/=0 and INC_DPTR='0' and Int_AddrA = "10000100" else 
+  	             DPH1 when SecondDPTR/=0 and INC_DPTR='0' and Int_AddrA = "10000101" else
   	             "0000000"&DPS when SecondDPTR/=0 and Int_AddrA = "10000110" else 
   	             
-  	             DPL0 when Int_AddrA = "10000010" else 
-  	             DPH0 when Int_AddrA = "10000011" else 
+  	             DPL0 when INC_DPTR='0' and Int_AddrA = "10000010" else 
+  	             DPH0 when INC_DPTR='0' and Int_AddrA = "10000011" else 
   	             IP when Int_AddrA = "10111000" else 
   	             SFR_RData_in;
 
