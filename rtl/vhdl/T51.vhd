@@ -45,7 +45,8 @@
 --
 -- File history :
 --
--- 16-Dec-05 : Bugfix for JBC Instruction
+-- 16-Dec-05 : Bugfix for JBC instruction
+-- 21-Jan-06 : Bugfix for INC DPTR instruction for special cases
 
 library IEEE;
 use IEEE.std_logic_1164.all;
@@ -58,7 +59,6 @@ entity T51 is
 		RAMAddressWidth : integer := 8;
 		SecondDPTR      : integer := 0;
 		tristate        : integer := 1;
-		fast_cpu        : integer := 0;
 		simenv          : integer := 0
 	);
 	port(
@@ -88,10 +88,13 @@ end T51;
 
 architecture rtl of T51 is
   constant Altera_IRAM_c : boolean :=false;
-
+  -- speeds up instructions "mov @Ri,direct" and "mov Ri,direct" by one cycle
+  -- but not fully testet. So use it with care
+  constant fast_cpu_c    : integer := 0;
+  
 	-- Registers
 	signal	ACC				: std_logic_vector(7 downto 0);
-	signal	B				: std_logic_vector(7 downto 0);
+	signal	B				  : std_logic_vector(7 downto 0);
 	signal	PSW				: std_logic_vector(7 downto 1);	-- Bit 0 is parity
 	signal	PSW0			: std_logic;
 	signal	IP				: std_logic_vector(7 downto 0);
@@ -103,6 +106,7 @@ architecture rtl of T51 is
 	signal	DPL			  : std_logic_vector(7 downto 0);	-- current DPTR
 	signal	DPH			  : std_logic_vector(7 downto 0);	-- current DPTR
 	signal  DPS,next_DPS  : std_logic;
+	signal  dptr_inc  : std_logic_vector(15 downto 0);
 	signal  DPS_r     : std_logic;
 	signal	PC				: unsigned(15 downto 0);
 	signal	P2R				: std_logic_vector(7 downto 0);
@@ -304,7 +308,7 @@ begin
 				  Int_AddrB   <= "000" & PSW(4 downto 3) & "00" & ROM_Data(0);
   				-- write to psw is in progress => forward argument
   				-- decreases timing !!!
-  				if fast_cpu/=0 and SFR_Wr_i = '1' and Int_AddrA_r = "11010000" then
+  				if fast_cpu_c/=0 and SFR_Wr_i = '1' and Int_AddrA_r = "11010000" then
   				  Int_AddrB <= "000" & Res_Bus(4 downto 3) & "00" & ROM_Data(0);
   				end if;
 				end if;
@@ -470,7 +474,6 @@ begin
 				     '0';
 
   -- to subsequent movx instructions
---  movx_Stall <= '0';
   movx_Stall <= '1' when Last = '1' and 
                         -- movx opcode at current instruction
                         Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and 
@@ -547,8 +550,13 @@ begin
   	-- Stack pointer
   	SFR_RData <= std_logic_vector(SP) when Int_AddrA = "10000001" else "ZZZZZZZZ";
   	
-    SFR_RData <= DPL1 when SecondDPTR/=0 and Int_AddrA = "10000100" else "ZZZZZZZZ";
-  	SFR_RData <= DPH1 when SecondDPTR/=0 and Int_AddrA = "10000101" else "ZZZZZZZZ";
+  	SFR_RData <= dptr_inc(7 downto 0) when (SecondDPTR/=0 and (INC_DPTR and next_DPS) = '1' and Int_AddrA = "10000100") or
+  	                                       ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000010") else "ZZZZZZZZ";
+    SFR_RData <= dptr_inc(15 downto 8) when (SecondDPTR/=0 and (INC_DPTR and next_DPS) = '1' and Int_AddrA = "10000101") or
+  	                                        ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000011") else "ZZZZZZZZ";
+    
+    SFR_RData <= DPL1 when SecondDPTR/=0 and INC_DPTR='0' and Int_AddrA = "10000100" else "ZZZZZZZZ";
+  	SFR_RData <= DPH1 when SecondDPTR/=0 and INC_DPTR='0' and Int_AddrA = "10000101" else "ZZZZZZZZ";
   	SFR_RData <= "0000000"&DPS when SecondDPTR/=0 and Int_AddrA = "10000110" else "ZZZZZZZZ";
   	
   	SFR_RData <= DPL0 when Int_AddrA = "10000010" else "ZZZZZZZZ";
@@ -562,6 +570,11 @@ begin
   	             ACC when Int_AddrA = "11100000" else 
   	             B when Int_AddrA = "11110000" else 
   	             std_logic_vector(SP) when Int_AddrA = "10000001" else 
+  	             
+  	             dptr_inc(7 downto 0) when (SecondDPTR/=0 and (INC_DPTR and next_DPS) = '1' and Int_AddrA = "10000100") or
+  	                                       ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000010") else 
+                 dptr_inc(15 downto 8) when (SecondDPTR/=0 and (INC_DPTR and next_DPS) = '1' and Int_AddrA = "10000101") or
+  	                                        ((INC_DPTR and not next_DPS) = '1' and Int_AddrA = "10000011") else
   	             
                  DPL1 when SecondDPTR/=0 and Int_AddrA = "10000100" else 
   	             DPH1 when SecondDPTR/=0 and Int_AddrA = "10000101" else 
@@ -703,7 +716,7 @@ begin
 	-- DPTR/RAM_Addr
 	RAM_WData <= ACC;
     --(Inst, P2R, DPH, DPL, Int_AddrA_r, SFR_Wr_i, Res_Bus, INC_DPTR, Mem_B)
-	process (DPH, DPL, INC_DPTR, Inst, Int_AddrA_r, Mem_B, P2R, Res_Bus, SFR_Wr_i, DPS)
+	process (DPH, DPL, INC_DPTR, dptr_inc, Inst, Int_AddrA_r, Mem_B, P2R, Res_Bus, SFR_Wr_i, DPS)
 	begin
 		RAM_Addr <= DPH & DPL;
 		if Inst(1) = '0' then
@@ -719,7 +732,8 @@ begin
 			end if;
 			-- 10100011 1 INC   DPTR
 			if INC_DPTR = '1' then
-				RAM_Addr <= std_logic_vector(unsigned(DPH) & unsigned(DPL) + 1);
+--				RAM_Addr <= std_logic_vector(unsigned(DPH) & unsigned(DPL) + 1);
+        RAM_Addr <= dptr_inc;
 			end if;
 		else -- movx a,@ri or movx @ri,a
 			RAM_Addr <= P2R & Mem_B;
@@ -750,12 +764,13 @@ begin
 -- mov @Ri,direct
 -- mov Ri,data
 -- da diese Befehle die Quelldaten einen Takt früher lesen als alle anderen Befehle
+
 --  	xxx_flag <= '1' when ((SFR_Wr_i and rd_flag)= '1' and Int_AddrA_r=Int_AddrA) or
 --  	                      ((Do_ACC_Wr and rd_flag)='1' and Int_AddrA = "11010000") or
 --  	                      (Status_Wr/="000" and rd_flag='1' and Int_AddrA="11010000") or
---  	                      (fast_cpu=0 and (rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000") else
+--  	                      (fast_cpu_c=0 and (rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000") else
 --  	            '0';
-  fast: if fast_cpu/=0 generate
+  fast: if fast_cpu_c/=0 generate
   	xxx_flag <= '1' when ((SFR_Wr_i and rd_flag)= '1' and Int_AddrA_r=Int_AddrA) or
   	                      ((Do_ACC_Wr and rd_flag)='1' and Int_AddrA = "11010000") or  -- WR to ACC in Progress and read from PSW
   	                      ((B_Wr and rd_flag)= '1' and Int_AddrA = "11110000") or
@@ -766,7 +781,7 @@ begin
   	                      else
   	            '0';
 	end generate;
-	slow: if fast_cpu=0 generate
+	slow: if fast_cpu_c=0 generate
 	  -- Inserts an Waitstate on every mov @Ri,direct or mov Ri,data Instruction
   	xxx_flag <= '1' when (rd_flag and not rd_flag_r) = '1' or                                        -- mov @ri,direct or mov ri,direct
   	                     ((rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000")  or         -- Wr to PSW and @Ri Adressing at next instruction
@@ -842,9 +857,11 @@ begin
   				end if;
   				-- 10100011 1 INC   DPTR
   				if INC_DPTR = '1' then
-  					tmp := unsigned(DPH) & unsigned(DPL) + 1;
-  					DPH0 <= std_logic_vector(tmp(15 downto 8));
-  					DPL0 <= std_logic_vector(tmp(7 downto 0));
+--  					tmp := unsigned(DPH) & unsigned(DPL) + 1;
+--  					DPH0 <= std_logic_vector(tmp(15 downto 8));
+--  					DPL0 <= std_logic_vector(tmp(7 downto 0));
+            DPH0 <= dptr_inc(15 downto 8);
+            DPL0 <= dptr_inc(7 downto 0);
   				end if;
   		  elsif SecondDPTR/=0 and DPS='1' then
   		    -- 10010000 3 MOV   DPTR,#data
@@ -856,9 +873,11 @@ begin
   				end if;
   				-- 10100011 1 INC   DPTR
   				if INC_DPTR = '1' then
-  					tmp := unsigned(DPH) & unsigned(DPL) + 1;
-  					DPH1 <= std_logic_vector(tmp(15 downto 8));
-  					DPL1 <= std_logic_vector(tmp(7 downto 0));
+--  					tmp := unsigned(DPH) & unsigned(DPL) + 1;
+--  					DPH1 <= std_logic_vector(tmp(15 downto 8));
+--  					DPL1 <= std_logic_vector(tmp(7 downto 0));
+            DPH1 <= dptr_inc(15 downto 8);
+            DPL1 <= dptr_inc(7 downto 0);
   				end if;
   		  end if;
 				INC_DPTR <= '0';
@@ -881,6 +900,8 @@ begin
 			end if;
 		end if;
 	end process;
+  
+  dptr_inc <= std_logic_vector(unsigned(DPH) & unsigned(DPL) + 1);
   
   process(DPS_r)
   begin
