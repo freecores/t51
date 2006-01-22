@@ -135,9 +135,8 @@ package T51_Pack is
 	generic(
 		DualBus         : integer := 1;
 		RAMAddressWidth : integer := 8;
-		SecondDPTR      : integer := 1;
-		tristate        : integer := 1;
-		fast_cpu        : integer := 0
+		SecondDPTR      : integer := 0;
+		tristate        : integer := 1
 	);
 	port(
 		Clk			     : in std_logic;
