@@ -58,6 +58,7 @@ entity T51 is
 		DualBus         : integer := 1; -- FALSE: single bus movx 
 		RAMAddressWidth : integer := 8;
 		SecondDPTR      : integer := 0;
+		t8032           : integer := 0; -- 0== advanced movx timing, not compatible to T8032
 		tristate        : integer := 1;
 		simenv          : integer := 0
 	);
@@ -751,7 +752,8 @@ begin
 	             
 --	RAM_Rd <= RAM_Rd_i and ramc and not ramrw_r when DualBus=0 else
 --	          RAM_Rd_i and ramc;
-  RAM_Rd <= RAM_Rd_i and ramc;
+  RAM_Rd <= RAM_Rd_i and ramc when t8032=0 else
+            RAM_Rd_i;
 
 	RAM_Wr <= RAM_Wr_i;
 	
@@ -775,7 +777,7 @@ begin
   	                      ((B_Wr and rd_flag)= '1' and Int_AddrA = "11110000") or
   	                      (Status_Wr/="000" and rd_flag='1' and Int_AddrA="11010000") or
 --  	                      (ramc='1' and ramc_r='0')
-                          (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and ramc_r='0') --MOVX A,??
+                          (t8032=0 and Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and ramc_r='0') --MOVX A,??
 --                          (((RAM_Rd_i and ramc)='1' or RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
   	                      else
   	            '0';
@@ -785,9 +787,9 @@ begin
   	xxx_flag <= '1' when (rd_flag and not rd_flag_r) = '1' or                                        -- mov @ri,direct or mov ri,direct
   	                     ((rd_sfr_flag and SFR_Wr_i) = '1' and Int_AddrA_r = "11010000")  or         -- Wr to PSW and @Ri Adressing at next instruction
 --  	                     (ramc='1' and ramc_r='0')
-                         (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and ramc_r='0') or  --MOVX A,??
+                         (t8032=0 and Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and ramc_r='0') or  --MOVX A,??
 --                         (((RAM_Rd_i and ramc)='1' or RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
-                         ((RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
+                         (t8032=0 and (RAM_Wr_i='1') and ramrw_r='0' and DualBus=0) 
   	                     else
   	            '0';
   	            
@@ -884,12 +886,16 @@ begin
 					INC_DPTR <= '1';
 				end if;
 			end if;
-			if Ready='1' then
+			if Ready='1' or t8032/=0 then
   			RAM_Wr_i <= '0';
   			-- movx instruction
-  			if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01") then -- and DualBus/=0) or
-  --				(Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and iReady = '0' and DualBus=0) then
-  				RAM_Wr_i <= '1';
+  			if t8032=0 then
+  			  if (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01") then
+  				  RAM_Wr_i <= '1';
+  			  end if;
+  			elsif (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and DualBus/=0) or
+				      (Inst(7 downto 2) = "111100" and Inst(1 downto 0) /= "01" and iReady = '0' and DualBus=0) then
+				  RAM_Wr_i <= '1';
   			end if;
   			RAM_Rd_i <= '0';
   --			if Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and iReady = '1' then
@@ -1022,9 +1028,8 @@ begin
 		PCPause <= '0';
 		-- push,pop
 		if (Inst(7 downto 5) = "110" and Inst(3 downto 0) = "0000" and FCycle = "01" and PCPaused(0) = '0') or -- PUSH, POP
---       (((RAM_Rd_i and ramc)='1' or RAM_Wr_i='1') and DualBus=0) or
---			(Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or -- Single bus MOVX
-      (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or 
+      (t8032=0 and Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or 
+      (t8032/=0 and Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 and PCPaused(0) = '0') or -- Single bus MOVX
 			(Inst = "10000100" and (PCPaused(3 downto 1) = "000" or Div_Rdy = '0')) then -- DIV
 			PCPause <= '1';
 		else
@@ -1034,8 +1039,8 @@ begin
 			end if;
 		end if;
 		-- Single bus MOVX
---		if Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0 then
-    if (Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01"  and DualBus=0) then
+    if (t8032=0 and Inst(7 downto 2) = "111000" and Inst(1 downto 0) /= "01"  and DualBus=0) or
+       (t8032/=0 and Inst(7 downto 5) = "111" and Inst(3 downto 2) = "00" and Inst(1 downto 0) /= "01" and DualBus=0) then
 			J_Skip <= '1';
 		end if;
 		-- Return
