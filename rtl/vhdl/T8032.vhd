@@ -96,11 +96,12 @@ architecture rtl of T8032 is
 	signal	Rst_n		: std_logic;
 	signal	ROM_Addr	: std_logic_vector(15 downto 0);
 	signal	ROM_Data	: std_logic_vector(7 downto 0);
-	signal	RAM_Addr	: std_logic_vector(15 downto 0);
+	signal	RAM_Addr	 : std_logic_vector(15 downto 0);
 	signal	RAM_RData	: std_logic_vector(7 downto 0);
 	signal	RAM_WData	: std_logic_vector(7 downto 0);
 	signal	RAM_Cycle	: std_logic;
 	signal	RAM_Cycle_r	: std_logic;
+	signal  CYC_s     : std_logic;
 	signal	RAM_Rd		: std_logic;
 	signal	RAM_Wr		: std_logic;
 	signal	IO_Rd		: std_logic;
@@ -169,21 +170,25 @@ begin
 	-- Wishbone interface
 	DAT_O <= RAM_WData;
 	ROM_Data <= DAT_I;
-	WE_O <= RAM_Wr;
-	TAG0_O <= RAM_Cycle;	-- PSEN_n
-	STB_O  <= '0';
+	WE_O   <= RAM_Wr and RAM_Cycle;
+	TAG0_O <= RAM_Cycle_r;	-- PSEN_n
+	STB_O  <= CYC_s;
+	CYC_O  <= CYC_s;
 	
-	process (Rst_n, CLK_I)
+	process(Rst_n, CLK_I)
 	begin
 		if Rst_n = '0' then
-			CYC_O <= '0';
+			CYC_s <= '0';
 			ADR_O <= (others => '0');
 			RAM_Cycle_r	 <= '0';
 			RAM_RData <= (others => '0');
 		elsif CLK_I'event and CLK_I = '1' then
-			CYC_O <= '1';
+			CYC_s <= '1';
 			RAM_Cycle_r <= RAM_Cycle;
-			RAM_RData <= DAT_I;
+			if ACK_I='1' then
+			  RAM_RData   <= DAT_I;
+			end if;
+		
 			if RAM_Cycle = '1' and (RAM_Cycle_r = '0' or ACK_I = '0') then
 				ADR_O <= RAM_Addr;
 			else
@@ -203,6 +208,7 @@ begin
 		generic map(
 			RAMAddressWidth => RAMAddressWidth,
 			tristate        => tristate,
+			t8032           => 1,
 			DualBus         => 0)
 		port map(
 			Clk => CLK_I,
