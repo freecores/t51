@@ -136,6 +136,7 @@ package T51_Pack is
 		DualBus         : integer := 1;
 		RAMAddressWidth : integer := 8;
 		SecondDPTR      : integer := 0;
+		t8032           : integer := 0;
 		tristate        : integer := 1
 	);
 	port(
