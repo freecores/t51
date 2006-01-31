@@ -244,6 +244,7 @@ begin
 		generic map(
 			DualBus         => 1,
       tristate        => tristate,
+      t8032           => 0,
 			RAMAddressWidth => IRAMAddressWidth)
 		port map(
 			Clk          => Clk,
