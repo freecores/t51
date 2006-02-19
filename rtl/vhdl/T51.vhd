@@ -47,6 +47,7 @@
 --
 -- 16-Dec-05 : Bugfix for JBC instruction
 -- 21-Jan-06 : Bugfix for INC DPTR instruction for special cases
+-- 19-Feb-06 : Bugfix for Interrupts at stalled instructions
 
 library IEEE;
 use IEEE.std_logic_1164.all;
@@ -484,7 +485,7 @@ begin
 	                      ROM_Data(1 downto 0) /= "01" else
 	               '0';
 		                
-	Stall_pipe <= Ri_Stall or PSW_Stall or ACC_Stall or SP_Stall or movx_Stall;
+	Stall_pipe <= (Ri_Stall or PSW_Stall or ACC_Stall or SP_Stall or movx_Stall) and not IStart;
 				
 	process (Rst_n, Clk)
 	  variable bitnr_v : natural range 0 to 7;
