@@ -4,7 +4,7 @@
 -- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
---           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.at)
 --
 -- All rights reserved
 --
@@ -77,12 +77,14 @@ entity T8052 is
 		RXD_IsO		: out std_logic;
 		RXD_O		: out std_logic;
 		TXD			: out std_logic;
-		ExSel		: out std_logic;
-		ExRd		: out std_logic;
-		ExWr		: out std_logic;
-		ExAddr		: out std_logic_vector(15 downto 0);
-		ExDI		: in std_logic_vector(7 downto 0);
-		ExDO		: out std_logic_vector(7 downto 0)
+		-- External XRAM Wishbone:
+    XRAM_WE_O   : out std_logic;
+    XRAM_STB_O  : out std_logic;
+    XRAM_CYC_O  : out std_logic;
+    XRAM_ACK_I  : in  std_logic;
+    XRAM_DAT_O  : out std_logic_vector(7 downto 0);
+    XRAM_ADR_O  : out std_logic_vector(15 downto 0);
+    XRAM_DAT_I  : in  std_logic_vector(7 downto 0)
 	);
 end T8052;
 
@@ -126,9 +128,12 @@ architecture rtl of T8052 is
 	signal	RAM_Rd		           : std_logic;
 	signal	RAM_Wr		           : std_logic;
 	signal	RAM_WE_n	           : std_logic;
-	signal	RAM_Sel_Addr         : std_logic_vector(15 downto XRAMAddressWidth);
-	signal	RAM_Sel_n	           : std_logic;
-	signal	Ex_Sel_i	           : std_logic;
+	signal	zeros                : std_logic_vector(15 downto XRAMAddressWidth);
+  signal  ram_access           : std_logic;
+  signal  mux_sel              : std_logic;
+  signal  mux_sel_r            : std_logic;
+  signal  ext_ram_en           : std_logic;
+  signal  int_xram_sel_n       : std_logic;
 	signal	IO_Rd		             : std_logic;
 	signal	IO_Wr		             : std_logic;
 	signal	IO_Addr		           : std_logic_vector(6 downto 0);
@@ -190,42 +195,62 @@ architecture rtl of T8052 is
 
 begin
 
-	Ready <= '1';
+	Ready <= '0' when (XRAM_ACK_I='0' and (ext_ram_en and ram_access)='1') else
+           '1';
 
-	ExSel <= Ex_Sel_i;
-	ExRd <= RAM_Rd;
-	ExWr <= RAM_Wr;
-	ExDO <= RAM_WData;
+	XRAM_ADR_O <= XRAM_Addr(15 downto 0); -- Registered address
+  XRAM_DAT_O <= RAM_WData;
+  XRAM_CYC_O <= ext_ram_en and ram_access;
+  XRAM_STB_O <= ext_ram_en and ram_access;
+  XRAM_WE_O  <= RAM_Wr;
 
-	process (Clk)
-	begin
-		if Clk'event and Clk = '1' then
-			IO_Addr_r   <= IO_Addr;
-			Ex_Sel_i    <= RAM_Sel_n;
-			RAM_Addr_r  <= RAM_Addr;
-		end if;
-	end process;
+  process (Rst_n,clk)
+  begin
+    if Rst_n='0' then
+      IO_Addr_r    <= (others =>'0');
+      RAM_Addr_r   <= (others =>'0');
+      mux_sel_r    <= '0';
+    elsif clk'event and clk = '1' then
+      IO_Addr_r <= IO_Addr;
+      if Ready = '1' then
+        RAM_Addr_r  <= RAM_Addr;
+      end if;
+      mux_sel_r <= mux_sel;
+    end if;
+  end process;
 
   XRAM_Addr <= RAM_Addr_r;
-
-  ExAddr <= XRAM_Addr;
 
 	rom : ROM52 port map(
 			Clk => Clk,
 			A => ROM_Addr(ROMAddressWidth - 1 downto 0),
 			D => ROM_Data);
 
+  zeros <= (others => '0');
 	g_rams0 : if XRAMAddressWidth > 15 generate
-		RAM_Sel_n <= '0';
+		ext_ram_en <= '0'; -- no external XRAM
 	end generate;
 
 	g_rams1 : if XRAMAddressWidth < 16 and  XRAMAddressWidth > 0 generate
-		RAM_Sel_n <= '0' when RAM_Addr(15 downto XRAMAddressWidth) = RAM_Sel_Addr else '1';
+		ext_ram_en <= '1' when XRAM_Addr(15 downto XRAMAddressWidth) /= zeros else 
+		              '0';
 	end generate;
 
-	RAM_Sel_Addr <= (others => '0');
-	RAM_WE_n <= not RAM_Wr;
-	RAM_RData <= ExDI when Ex_Sel_i = '1' else RAM_DO;
+  ram_access <= '1' when (RAM_Rd or RAM_Wr)='1' else
+                '0';
+
+  -- xram bus access is pipelined.
+  -- so use registered signal for selecting read data
+	RAM_RData <= RAM_DO    when mux_sel_r = '0' else
+               XRAM_DAT_I;
+               
+  -- select data mux             
+  mux_sel  <= ext_ram_en;
+
+  -- internal XRAM select signal is active low.
+  -- so internal xram is selected when external XRAM is not selected (ext_ram_en = '0')
+  int_xram_sel_n <= ext_ram_en;
+  RAM_WE_n       <= not RAM_Wr;
 
 	g_ram : if XRAMAddressWidth > 0 generate
 		ram : SSRAM
@@ -233,7 +258,7 @@ begin
 				AddrWidth => XRAMAddressWidth)
 			port map(
 				Clk  => Clk,
-				CE_n => Ex_Sel_i,
+				CE_n => int_xram_sel_n,
 				WE_n => RAM_WE_n,
 				A    => XRAM_Addr(XRAMAddressWidth - 1 downto 0),
 				DIn  => RAM_WData,

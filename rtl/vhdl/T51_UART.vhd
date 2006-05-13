@@ -4,7 +4,7 @@
 -- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
---           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.at)
 --
 -- All rights reserved
 --
@@ -44,7 +44,7 @@
 -- Limitations :
 --
 -- File history :
---
+-- 15-Jan-06 : Bugfix for writing SCON Register in mode 0
 
 library IEEE;
 use IEEE.std_logic_1164.all;
@@ -194,8 +194,11 @@ begin
 			if SC_Wr = '1' then
 				SCON(0) <= Data_In(0);
 				SCON(2) <= Data_In(2);
-				RX_Shifting <= '0';
+--				RX_Shifting <= '0';
 			end if;
+			if SCON(7 downto 6) /= "00" then
+        RX_Shifting <= '0';
+      end if;
 			if SCON(7 downto 6) = "00" and Tick6 = '1' and (TXD_i = '0' or RX_Bit_Cnt = 0) then
 				if SCON(4) = '1' and SCON(0) = '0' and RX_Bit_Cnt = 0 then
 					RX_Shifting <= '1';
@@ -287,11 +290,14 @@ begin
 		elsif Clk'event and Clk = '1' then
 			if SC_Wr = '1' then
 				SCON(1) <= Data_In(1);
-				TX_Shifting <= '0';
+--				TX_Shifting <= '0';
 			end if;
 			if SB_Wr = '1' then
 				TX_Data <= Data_In;
 				TX_Start <= '1';
+			end if;
+			if SCON(7 downto 6) /= "00" then
+			  TX_Shifting <= '0';
 			end if;
 			if Tick6 = '1' and (RX_Shifting = '1' or TX_Shifting = '1') then
 				TXD_i <= not TXD_i;

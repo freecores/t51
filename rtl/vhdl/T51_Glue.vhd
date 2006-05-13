@@ -4,7 +4,7 @@
 -- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
---           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.at)
 --
 -- All rights reserved
 --
@@ -106,15 +106,7 @@ entity T51_Glue is
     TH2_Wr    : out std_logic;
     SCON_Wr   : out std_logic;
     SBUF_Wr   : out std_logic;
-    Int_Trig  : out std_logic_vector(6 downto 0);
-    -- SevenSeg Controller
-    SevSeg_Con_Sel : out std_logic;
-    SevSeg_Con_Wr  : out std_logic;
-    SevSeg_DataL_Sel : out std_logic;
-    SevSeg_DataL_Wr  : out std_logic;
-    SevSeg_DataH_Sel : out std_logic;
-    SevSeg_DataH_Wr  : out std_logic
-    
+    Int_Trig  : out std_logic_vector(6 downto 0)
   );
 end T51_Glue;
 
@@ -259,12 +251,4 @@ begin
   SCON_Wr <= '1' when IO_Addr_r = "0011000" and IO_Wr = '1' else '0';
   SBUF_Sel <= '1' when IO_Addr = "0011001" else '0';
   SBUF_Wr <= '1' when IO_Addr_r = "0011001" and IO_Wr = '1' else '0';
-
-  -- SevenSeg Controller
-  SevSeg_Con_Sel <= '1' when IO_Addr = "0010001" else '0'; -- 0x91
-  SevSeg_Con_Wr  <= '1' when IO_Addr_r = "0010001" and IO_Wr = '1' else '0';
-  SevSeg_DataL_Sel <= '1' when IO_Addr = "0010010" else '0'; -- 0x92
-  SevSeg_DataL_Wr <= '1' when IO_Addr_r = "0010010" and IO_Wr = '1' else '0';
-  SevSeg_DataH_Sel <= '1' when IO_Addr = "0010011" else '0'; -- 0x93
-  SevSeg_DataH_Wr <= '1' when IO_Addr_r = "0010011" and IO_Wr = '1' else '0';
 end;

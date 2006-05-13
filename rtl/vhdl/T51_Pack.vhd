@@ -4,7 +4,7 @@
 -- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
---           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.at)
 --
 -- All rights reserved
 --
@@ -220,14 +220,7 @@ package T51_Pack is
 		TH2_Wr		: out std_logic;
 		SCON_Wr		: out std_logic;
 		SBUF_Wr		: out std_logic;
-		Int_Trig	: out std_logic_vector(6 downto 0);
-		-- SevenSeg Controller
-		SevSeg_Con_Sel   : out std_logic;
-		SevSeg_Con_Wr    : out std_logic;
-		SevSeg_DataL_Sel : out std_logic;
-		SevSeg_DataL_Wr  : out std_logic;
-		SevSeg_DataH_Sel : out std_logic;
-		SevSeg_DataH_Wr  : out std_logic
+		Int_Trig	: out std_logic_vector(6 downto 0)
 	);
 	end component;
 

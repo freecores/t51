@@ -4,7 +4,7 @@
 -- Version : 0300
 --
 -- Copyright (c) 2001-2002 Daniel Wallner (jesus@opencores.org)
---           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.ac.at)
+--           (c) 2004-2005 Andreas Voggeneder (andreas.voggeneder@fh-hagenberg.at)
 --
 -- All rights reserved
 --
@@ -69,20 +69,7 @@ entity T51_Port is
 	);
 end T51_Port;
 
-architecture rtl of T51_Port is
---  component InputSync
---    port (
---      Input : in  std_ulogic;
---      clk   : in  std_ulogic;
---      clr_n : in  std_ulogic;
---      q     : out std_ulogic);
---  end component;
---  component PULLUP
---    port (
---      O : out std_logic
---      );
---  end component;
-  
+architecture rtl of T51_Port is 
 	signal Port_Output	: std_logic_vector(7 downto 0);
 	signal Port_Input	: std_logic_vector(7 downto 0);
 --	signal P_trans  	: std_logic_vector(7 downto 0);
@@ -101,19 +88,9 @@ begin
   end generate;
   
 iop: for i in 0 to 7 generate
---  IOPort(i) <= '0' when Port_Output(i) = '0' else 'Z';
---  P_PULLUP: PULLUP port map(O =>IOPort(i));
---  IOPort(i) <= 'H';
+
   IOPort_out(i) <= Port_Output(i);
-  Port_Input(i)<=To_X01Z(IOPort_in(i));
-  
-  
---  ISP : InputSync
---      port map (
---        Input => P_trans(i),
---        clk   => clk,
---        clr_n => Rst_n,
---        q     => Port_Input(i));
+  Port_Input(i) <= To_X01Z(IOPort_in(i));
 end generate;
 
 	process (Rst_n, Clk)
