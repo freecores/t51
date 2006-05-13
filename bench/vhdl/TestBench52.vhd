@@ -19,12 +19,13 @@ architecture behaviour of TestBench52 is
 	signal P2			: std_logic_vector(7 downto 0);
 	signal P3			: std_logic_vector(7 downto 0);
 	signal p3_out	: std_logic_vector(7 downto 0);
-	signal ExSel		: std_logic;
-	signal ExRd			: std_logic;
-	signal ExWr			: std_logic;
-	signal ExAddr		: std_logic_vector(15 downto 0);
-	signal ExDI			: std_logic_vector(7 downto 0);
-	signal ExDO			: std_logic_vector(7 downto 0);
+  signal XRAM_WE_s   : std_logic;
+  signal XRAM_STB_s  : std_logic;
+  signal XRAM_CYC_s  : std_logic;
+  signal XRAM_ACK_s  : std_logic;
+  signal XRAM_DATI_s : std_logic_vector(7 downto 0);
+  signal XRAM_ADR_s  : std_logic_vector(15 downto 0);
+  signal XRAM_DATO_s : std_logic_vector(7 downto 0);
 
 begin
 
@@ -50,16 +51,19 @@ begin
 			RXD_IsO => RXD_IsOut,
 			RXD_O => RXD_Out,
 			TXD => TXD,
-			ExSel => ExSel,
-			ExRd => ExRd,
-			ExWr => ExWr,
-			ExAddr => ExAddr,
-			ExDI => ExDI,
-			ExDO => ExDO);
-
+			XRAM_WE_O  => XRAM_WE_s, 
+      XRAM_STB_O => XRAM_STB_s,
+      XRAM_CYC_O => XRAM_CYC_s,
+      XRAM_ACK_I => XRAM_ACK_s,
+      XRAM_DAT_O => XRAM_DATO_s,
+      XRAM_ADR_O => XRAM_ADR_s,
+      XRAM_DAT_I => XRAM_DATI_s
+			);
+      
 	P3(0) <= RXD;
 	P3(7 downto 1) <= P3_out(7 downto 1);
-	ExDI <= (others => '1');
+	XRAM_DATI_s    <= (others => '1');
+	XRAM_ACK_s     <= XRAM_STB_s;
 
 	as : AsyncStim generic map(FileName => "BASIC.txt", InterCharDelay => 5000 us, Baud => 57600, Bits => 8)
 				port map(RXD);
