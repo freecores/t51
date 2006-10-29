@@ -86,7 +86,7 @@ begin
 	process (Clk)
 		variable Tmp1	: unsigned(15 downto 0);
 		variable Tmp2	: unsigned(8 downto 0);
-		variable Tmp3	: unsigned(8 downto 0);
+		variable Tmp3	: unsigned(7 downto 0);
 		variable Cnt	: unsigned(3 downto 0);
 	begin
 		if Clk'event and Clk = '1' then
@@ -113,7 +113,7 @@ begin
 			elsif Cnt(3) = '0' then
 				Tmp1(15 downto 1) := Tmp1(14 downto 0);
 				Tmp1(0) := '0';
-				Tmp2 := ("1" & Tmp1(15 downto 8)) - Tmp3;
+				Tmp2 := ("1" & Tmp1(15 downto 8)) - ("0" & Tmp3);
 				if Tmp2(8) = '1' then
 					Tmp1(0) := '1';
 					Tmp1(15 downto 8) := Tmp2(7 downto 0);
@@ -124,7 +124,7 @@ begin
 			if Old_ACC /= ACC or Old_B /= B then
 				Tmp1(7 downto 0) := unsigned(ACC);
 				Tmp1(15 downto 8) := "00000000";
-				Tmp3 := "0" & unsigned(B);
+				Tmp3 := unsigned(B);
 				Cnt := "0000";
 				Div_Rdy <= '0';
 			else
